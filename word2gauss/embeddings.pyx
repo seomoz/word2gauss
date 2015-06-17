@@ -1,14 +1,6 @@
 #cython: boundscheck=False, wraparound=False, embedsignature=True, cdivision=True
 
 
-# TODO:!!!!
-# make space for acc_grad arrays, store their pointers, pass them into
-#   train_batch
-# add unit tests!
-# add some timing
-
-
-#
 # have words/tokens w[i], i = 1 .. N
 # Each word has probability P[i] = gaussian
 # The Gaussian is parameterized by
@@ -113,6 +105,7 @@ np.import_array()
 
 from libc.math cimport log, sqrt
 from libc.stdlib cimport malloc, free
+from libcpp.vector cimport vector
 
 import numpy as np
 
@@ -447,10 +440,13 @@ cdef void train_batch(
     cdef DTYPE_t fac
 
     # working space for the gradient
-    cdef DTYPE_t* dmui = <DTYPE_t*>malloc(K * sizeof(DTYPE_t))
-    cdef DTYPE_t* dmuj = <DTYPE_t*>malloc(K * sizeof(DTYPE_t))
-    cdef DTYPE_t* dSigmai = <DTYPE_t*>malloc(K * sizeof(DTYPE_t))
-    cdef DTYPE_t* dSigmaj = <DTYPE_t*>malloc(K * sizeof(DTYPE_t))
+    # make one vector of length 4 * K, then partition it up for
+    # the four different types of gradients
+    cdef DTYPE_t* work = <DTYPE_t*>malloc(K * 4 * sizeof(DTYPE_t))
+    cdef DTYPE_t* dmui = work
+    cdef DTYPE_t* dmuj = work + K
+    cdef DTYPE_t* dSigmai = work + 2 * K
+    cdef DTYPE_t* dSigmaj = work + 3 * K
 
     for k in range(Npairs):
 
@@ -497,10 +493,7 @@ cdef void train_batch(
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
 
-    free(dmui)
-    free(dmuj)
-    free(dSigmai)
-    free(dSigmaj)
+    free(work)
 
 cdef void _accumulate_update(
     size_t k, DTYPE_t* dmu, DTYPE_t* dSigma,
@@ -549,4 +542,63 @@ cdef void _accumulate_update(
             Sigma_ptr[k] = M
         elif Sigma_ptr[k] < m:
             Sigma_ptr[k] = m
+
+cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
+    text, random_gen, uint32_t half_window_size=2,
+    uint32_t nsamples_per_word=1):
+    '''
+    Take a chunk of text and turn it into a array of pairs for training.
+
+    text is a list of text documents / sentences.
+
+    Each element of the list is a numpy array of uint32_t IDs, with -1
+    signifying an OOV ID representing the document or sentence.
+
+    For position k in the document, uses all contexts from k - half_window_size
+    to k + half_window_size
+
+    random_gen = a callable that returns random IDs:
+        array of uint32_t length N with random IDs = random_gen(N)
+    nsamples_per_words = for each positive pair, sample this many negative
+        pairs
+    '''
+    # calculate number of windows we need
+    # need all positive indices in half_window_size for each word, except
+    # words at end, so this slightly overestimates number of pairs
+    cdef long long npairs = sum(
+        [len(doc) * half_window_size * nsamples_per_word for doc in text]
+    )
+
+    # allocate pairs and draw random numbers
+    cdef np.ndarray[uint32_t, ndim=2, mode='c'] pairs = np.empty(
+        (npairs, 4), dtype=np.uint32)
+    cdef np.ndarray[uint32_t] randids = random_gen(npairs)
+    cdef np.ndarray[uint32_t, ndim=1, mode='c'] cdoc
+
+    cdef size_t next_pair = 0  # index of next pair to write
+    cdef size_t i, j, k
+    cdef uint32_t doc_len
+
+    for doc in text:
+        cdoc = doc
+        doc_len = cdoc.shape[0]
+        for i in range(doc_len):
+            if cdoc[i] == -1:
+                # OOV word
+                continue
+            for j in range(i + 1, min(i + half_window_size + 1, doc_len)):
+                if cdoc[j] == -1:
+                    # OOV word
+                    continue
+                # take nsamples_per_word samples
+                for k in range(nsamples_per_word):
+                    pairs[next_pair, 0] = cdoc[i]
+                    pairs[next_pair, 1] = cdoc[j]
+                    pairs[next_pair, 2] = cdoc[i]
+                    # ignore case where sample is i or j for now
+                    pairs[next_pair, 3] = randids[next_pair]
+                    next_pair += 1
+
+    return np.ascontiguousarray(pairs[:next_pair, :])
+
 

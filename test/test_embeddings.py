@@ -3,8 +3,7 @@ import unittest
 
 import numpy as np
 
-from word2gauss.embeddings import GaussianEmbedding
-from word2gauss.utils import cosine
+from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
 
 DTYPE = np.float32
 
@@ -83,6 +82,29 @@ class TestGaussianEmbedding(unittest.TestCase):
         # check nearest neighbors to 2, the last two should be 0, 1
         neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
         self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
+
+
+class TestTexttoPairs(unittest.TestCase):
+    def test_text_to_pairs(self):
+        # mock out the random int generator
+        r = lambda N: np.arange(N, dtype=np.uint32)
+        text = [
+            np.array([1, 2, 3, -1, -1, 4, 5], dtype=np.uint32),
+            np.array([], dtype=np.uint32),
+            np.array([10, 11], dtype=np.uint32)
+        ]
+        actual = text_to_pairs(text, r, nsamples_per_word=2)
+        expected = np.array([[ 1,  2,  1,  0],
+               [ 1,  2,  1,  1],
+               [ 1,  3,  1,  2],
+               [ 1,  3,  1,  3],
+               [ 2,  3,  2,  4],
+               [ 2,  3,  2,  5],
+               [ 4,  5,  4,  6],
+               [ 4,  5,  4,  7],
+               [10, 11, 10,  8],
+               [10, 11, 10,  9]], dtype=np.uint32)
+        self.assertTrue((actual == expected).all())
 
 
 if __name__ == '__main__':
