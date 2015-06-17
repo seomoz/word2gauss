@@ -518,7 +518,7 @@ cdef void _accumulate_update(
     acc_grad_mu[k] += sum_dmu2
 
     # now get local learning rate for this word
-    local_eta = eta / sqrt(acc_grad_mu[k] + 1.0)
+    local_eta = eta / (sqrt(acc_grad_mu[k]) + 1.0)
 
     # finally update mu
     l2_mu = 0.0
@@ -536,7 +536,7 @@ cdef void _accumulate_update(
     # now for Sigma
     if covariance_type == SPHERICAL:
         acc_grad_sigma[k] += dSigma[0] ** 2
-        local_eta = eta / sqrt(acc_grad_sigma[k] + 1.0)
+        local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         Sigma_ptr[k] -= fac * local_eta * dSigma[0]
         if Sigma_ptr[k] > M:
             Sigma_ptr[k] = M
