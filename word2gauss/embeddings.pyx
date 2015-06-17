@@ -271,6 +271,24 @@ cdef class GaussianEmbedding:
         self.acc_grad_sigma = _acc_grad_sigma
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
+    def save(self, fname, vocab=None):
+        '''
+        Writes a gzipped text file of the model in word2vec text format
+
+        word_or_id1 0.5 -0.2 1.0 ...
+        word_or_id2 ...
+
+        This class doesn't have knowledge of id -> word mapping, so
+        it can be passed in as a callable vocab(id) return the word string
+        '''
+        from gzip import GzipFile
+        if not vocab:
+            vocab = lambda x: x
+        with GzipFile(fname, 'w') as fout:
+            for i in xrange(self.N):
+                line = [vocab(i)] + self.mu[i, :].tolist()
+                fout.write(' '.join('%s' % ele for ele in line) + '\n')
+
     def nearest_neighbors(self, word_id, metric=cosine, num=10):
         '''Return the num nearest neighbors to word_id, using the metric
 

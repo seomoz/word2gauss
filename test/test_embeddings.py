@@ -7,24 +7,27 @@ from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
 
 DTYPE = np.float32
 
+def sample_embed():
+    mu = np.array([
+        [0.0, 0.0],
+        [1.0, -1.25],
+        [-0.1, -0.4]
+    ], dtype=DTYPE)
+    Sigma = np.array([
+        [1.0],
+        [5.0],
+        [0.8]
+    ], dtype=DTYPE)
+
+    return GaussianEmbedding(3, size=2,
+        covariance_type='spherical',
+        energy_type='KL',
+        mu=mu, Sigma=Sigma
+    )
+
 class TestKLEnergy(unittest.TestCase):
     def setUp(self):
-        mu = np.array([
-            [0.0, 0.0],
-            [1.0, -1.25],
-            [-0.1, -0.4]
-        ], dtype=DTYPE)
-        Sigma = np.array([
-            [1.0],
-            [5.0],
-            [0.8]
-        ], dtype=DTYPE)
-
-        self.embed = GaussianEmbedding(3, size=2,
-            covariance_type='spherical',
-            energy_type='KL',
-            mu=mu, Sigma=Sigma
-        )
+        self.embed = sample_embed()
 
     def test_kl_energy_spherical(self):
         # divergence between same distribution is 0
@@ -33,7 +36,6 @@ class TestKLEnergy(unittest.TestCase):
         # energy = -KL divergence
         # 0 is closer to 2 then to 1
         self.assertTrue(-self.embed.energy(0, 2) < -self.embed.energy(0, 1))
-
 
 class TestGaussianEmbedding(unittest.TestCase):
     def test_train(self):
