@@ -303,18 +303,6 @@ cdef class GaussianEmbedding:
         top_indices = [ele for ele in sorted_indices if ele != word_id]
         return top_indices, scores[top_indices]
 
-    def __getitem__(self, key):
-        if key == 'mu':
-            return self.mu
-        elif key == 'sigma':
-            return self.sigma
-        elif key == 'acc_grad_mu':
-            return self.acc_grad_mu
-        elif key == 'acc_grad_sigma':
-            return self.acc_grad_sigma
-        else:
-            raise KeyError
-
     def __getattr__(self, name):
         if name == 'mu':
             return self.mu
