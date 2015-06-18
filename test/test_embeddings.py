@@ -37,8 +37,9 @@ class TestKLEnergy(unittest.TestCase):
         # 0 is closer to 2 then to 1
         self.assertTrue(-self.embed.energy(0, 2) < -self.embed.energy(0, 1))
 
+
 class TestGaussianEmbedding(unittest.TestCase):
-    def test_train(self):
+    def _training_data(self):
         # 10 words
         # word 0 and 1 co-occur frequently
         # the rest co-occur randomly
@@ -67,14 +68,43 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             training_data[k, :] = pos + neg
 
+        return training_data
+
+    def test_train_batch(self):
+        training_data = self._training_data()
+
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
             mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
         )
 
-        for k in xrange(0, nsamples, 100):
+        for k in xrange(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
+
+        # should have 0 - 1 close together and 0..1 - 2..9 far apart
+        # should also have 2..9 all near each other
+        neighbors0, scores0 = embed.nearest_neighbors(0, num=10)
+        self.assertEqual(neighbors0[0], 1)
+
+        # check nearest neighbors to 2, the last two should be 0, 1
+        neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
+        self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
+
+    def test_train_threads(self):
+        training_data = self._training_data()
+
+        embed = GaussianEmbedding(10, 5,
+            covariance_type='spherical',
+            energy_type='KL',
+            mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+        )
+
+        def iter_pairs():
+            for k in xrange(0, len(training_data), 100):
+                yield training_data[k:(k+100)]
+
+        embed.train(iter_pairs(), n_workers=4)
 
         # should have 0 - 1 close together and 0..1 - 2..9 far apart
         # should also have 2..9 all near each other

@@ -107,9 +107,13 @@ from libc.math cimport log, sqrt
 from libc.stdlib cimport malloc, free
 from libcpp.vector cimport vector
 
+import logging
+import time
 import numpy as np
 
 from .utils import cosine
+
+LOGGER = logging.getLogger()
 
 
 cdef extern from "stdint.h":
@@ -315,17 +319,76 @@ cdef class GaussianEmbedding:
         else:
             raise AttributeError
 
+    def train(self, iter_pairs, n_workers=1, report_interval=10):
+        '''
+        Train the model from an iterator of many batches of pairs.
+
+        use n_workers many workers
+        report_interval: report every this many batches
+        '''
+        # threadpool implementation of training
+        from Queue import Queue
+        from threading import Thread, Lock
+
+        # each job is a batch of pairs from the iterator
+        # add jobs to a queue, workers pop from the queue
+        # None means no more jobs
+        jobs = Queue(maxsize=2 * n_workers)
+
+        # number processed, next time to log, logging interval
+        # make it a list so we can modify it in the thread w/o a local var
+        processed = [0, report_interval, report_interval]
+        t1 = time.time()
+        lock = Lock()
+        def _worker():
+            while True:
+                pairs = jobs.get()
+                if pairs is None:
+                    # no more data
+                    break
+                self.train_batch(pairs)
+                with lock:
+                    processed[0] += 1
+                    if processed[0] >= processed[1]:
+                        t2 = time.time()
+                        LOGGER.info("Processed %s batches, elapsed time: %s"
+                            % (processed[0], t2 - t1))
+                        processed[1] = processed[0] + processed[2]
+
+        # start threads
+        threads = []
+        for k in xrange(n_workers):
+            thread = Thread(target=_worker)
+            thread.daemon = True
+            thread.start()
+            threads.append(thread)
+
+        # put data on the queue!
+        for batch_pairs in iter_pairs:
+            jobs.put(batch_pairs)
+
+        # no more data, tell the threads to stop
+        for i in xrange(len(threads)):
+            jobs.put(None)
+
+        # now join the threads
+        for thread in threads:
+            thread.join()
+
+
     def train_batch(self, np.ndarray[uint32_t, ndim=2, mode='c'] pairs):
         '''
         Update the model with a single batch of pairs
         '''
-        train_batch(&pairs[0, 0], pairs.shape[0],
-            self.energy_func, self.gradient_func,
-            self.mu_ptr, self.sigma_ptr, self.covariance_type,
-            self.N, self.K,
-            self.eta, self.Closs, self.mu_max, self.sigma_min, self.sigma_max,
-            self.acc_grad_mu_ptr, self.acc_grad_sigma_ptr
-        )
+        with nogil:
+            train_batch(&pairs[0, 0], pairs.shape[0],
+                self.energy_func, self.gradient_func,
+                self.mu_ptr, self.sigma_ptr, self.covariance_type,
+                self.N, self.K,
+                self.eta, self.Closs,
+                self.mu_max, self.sigma_min, self.sigma_max,
+                self.acc_grad_mu_ptr, self.acc_grad_sigma_ptr
+            )
 
     def energy(self, i, j):
         '''
