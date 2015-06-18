@@ -134,7 +134,7 @@ cdef uint32_t KL = 1
 # interface for an energy function
 # energy(i, j, # word indices to compute energy for
 #        mu_ptr,  # pointer to mu array
-#        Sigma_ptr,  # pointer to sigma array
+#        sigma_ptr,  # pointer to sigma array
 #        covariance_type (SPHERICAL, etc)
 #        nwords, ndimensions)
 ctypedef DTYPE_t (*energy_t)(size_t, size_t,
@@ -142,9 +142,9 @@ ctypedef DTYPE_t (*energy_t)(size_t, size_t,
 
 # interface for a gradient function
 # gradient(i, j, # word indices to compute energy for
-#          dEdmui_ptr, dEdSigma1_ptr, dEdmuj_ptr, dEdSigmaj_ptr
+#          dEdmui_ptr, dEdsigma1_ptr, dEdmuj_ptr, dEdsigmaj_ptr
 #          mu_ptr,  # pointer to mu array
-#          Sigma_ptr,  # pointer to sigma array
+#          sigma_ptr,  # pointer to sigma array
 #          covariance_type (SPHERICAL, etc)
 #          nwords, ndimensions)
 ctypedef void (*gradient_t)(size_t, size_t,
@@ -154,7 +154,7 @@ ctypedef void (*gradient_t)(size_t, size_t,
 
 cdef class GaussianEmbedding:
 
-    cdef np.ndarray mu, Sigma, acc_grad_mu, acc_grad_sigma
+    cdef np.ndarray mu, sigma, acc_grad_mu, acc_grad_sigma
     cdef uint32_t covariance_type
 
     # number of words, dimension of vectors
@@ -173,7 +173,7 @@ cdef class GaussianEmbedding:
 
     # pointers to data arrays
     cdef DTYPE_t* mu_ptr
-    cdef DTYPE_t* Sigma_ptr
+    cdef DTYPE_t* sigma_ptr
     cdef DTYPE_t* acc_grad_mu_ptr
     cdef DTYPE_t* acc_grad_sigma_ptr
 
@@ -186,28 +186,28 @@ cdef class GaussianEmbedding:
             'sigma_std0': 1.0
         },
         eta=1.0, Closs=1.0,
-        mu=None, Sigma=None):
+        mu=None, sigma=None):
         '''
         N = number of distributions (e.g. number of words)
         size = dimension of each Gaussian
         covariance_type = 'spherical' or ...
         energy_type = 'KL' or ...
         mu_max = maximum L2 norm of each mu
-        sigma_min, sigma_max = maximum/min eigenvalues of Sigma
+        sigma_min, sigma_max = maximum/min eigenvalues of sigma
         init_params = {
             mu0: initial means are random normal w/ mean=0, std=mu0
-            sigma_mean0, sigma_std0: initial Sigma is random normal with
+            sigma_mean0, sigma_std0: initial sigma is random normal with
                 mean=sigma_mean0, std=sigma_std0
-            NOTE: these are ignored if mu/Sigma is explicitly specified
+            NOTE: these are ignored if mu/sigma is explicitly specified
         }
         eta = global learning rate
         Closs = regularization parameter in max-margin loss
             loss = max(0.0, Closs - energy(pos) + energy(neg)
-        if mu/Sigma are not None then they specify the initial values
+        if mu/sigma are not None then they specify the initial values
             for the parameters
         '''
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
-        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _Sigma
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
 
@@ -240,24 +240,24 @@ cdef class GaussianEmbedding:
             _mu = mu
         self.mu = _mu
 
-        if Sigma is None:
+        if sigma is None:
             if self.covariance_type == SPHERICAL:
                 s = np.random.randn(self.N, 1).astype(DTYPE)
             s *= init_params['sigma_std0']
             s += init_params['sigma_mean0']
-            _Sigma = np.ascontiguousarray(
+            _sigma = np.ascontiguousarray(
                 np.maximum(sigma_min, np.minimum(s, sigma_max)))
         else:
-            assert Sigma.shape[0] == N
+            assert sigma.shape[0] == N
             if self.covariance_type == SPHERICAL:
-                assert Sigma.shape[1] == 1
-            _Sigma = Sigma
-        self.Sigma = _Sigma
+                assert sigma.shape[1] == 1
+            _sigma = sigma
+        self.sigma = _sigma
 
         assert _mu.flags['C_CONTIGUOUS']
-        assert _Sigma.flags['C_CONTIGUOUS']
+        assert _sigma.flags['C_CONTIGUOUS']
         self.mu_ptr = &_mu[0, 0]
-        self.Sigma_ptr = &_Sigma[0, 0]
+        self.sigma_ptr = &_sigma[0, 0]
 
         # working space for accumulated gradients
         _acc_grad_mu = np.ascontiguousarray(np.zeros(N, dtype=DTYPE))
@@ -306,19 +306,34 @@ cdef class GaussianEmbedding:
     def __getitem__(self, key):
         if key == 'mu':
             return self.mu
-        elif key == 'Sigma':
-            return self.Sigma
+        elif key == 'sigma':
+            return self.sigma
         elif key == 'acc_grad_mu':
             return self.acc_grad_mu
         elif key == 'acc_grad_sigma':
             return self.acc_grad_sigma
         else:
             raise KeyError
-            
+
+    def __getattr__(self, name):
+        if name == 'mu':
+            return self.mu
+        elif name == 'sigma':
+            return self.sigma
+        elif name == 'acc_grad_mu':
+            return self.acc_grad_mu
+        elif name == 'acc_grad_sigma':
+            return self.acc_grad_sigma
+        else:
+            raise AttributeError
+
     def train_batch(self, np.ndarray[uint32_t, ndim=2, mode='c'] pairs):
+        '''
+        Update the model with a single batch of pairs
+        '''
         train_batch(&pairs[0, 0], pairs.shape[0],
             self.energy_func, self.gradient_func,
-            self.mu_ptr, self.Sigma_ptr, self.covariance_type,
+            self.mu_ptr, self.sigma_ptr, self.covariance_type,
             self.N, self.K,
             self.eta, self.Closs, self.mu_max, self.sigma_min, self.sigma_max,
             self.acc_grad_mu_ptr, self.acc_grad_sigma_ptr
@@ -331,7 +346,7 @@ cdef class GaussianEmbedding:
         This a wrapper around the cython code for convenience
         '''
         return self.energy_func(i, j,
-            self.mu_ptr, self.Sigma_ptr, self.covariance_type,
+            self.mu_ptr, self.sigma_ptr, self.covariance_type,
             self.N, self.K)
 
     def gradient(self, i, j):
@@ -339,28 +354,28 @@ cdef class GaussianEmbedding:
         Compute the gradient with i and j
 
         This a wrapper around the cython code for convenience
-        Returns (dmui, dSigmai), (dmuj, dSigmaj)
+        Returns (dmui, dsigmai), (dmuj, dsigmaj)
         '''
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dmui
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dmuj
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dSigmai
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dSigmaj
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dsigmai
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] dsigmaj
 
         dmui = np.zeros(self.K, dtype=DTYPE)
         dmuj = np.zeros(self.K, dtype=DTYPE)
         if self.covariance_type == SPHERICAL:
-            dSigmai = np.zeros(1, dtype=DTYPE)
-            dSigmaj = np.zeros(1, dtype=DTYPE)
+            dsigmai = np.zeros(1, dtype=DTYPE)
+            dsigmaj = np.zeros(1, dtype=DTYPE)
 
         self.gradient_func(i, j,
-            &dmui[0], &dSigmai[0], &dmuj[0], &dSigmaj[0],
-            self.mu_ptr, self.Sigma_ptr, self.covariance_type,
+            &dmui[0], &dsigmai[0], &dmuj[0], &dsigmaj[0],
+            self.mu_ptr, self.sigma_ptr, self.covariance_type,
             self.N, self.K)
-        return (dmui, dSigmai), (dmuj, dSigmaj)
+        return (dmui, dsigmai), (dmuj, dsigmaj)
 
 
 cdef DTYPE_t kl_energy(size_t i, size_t j,
-    DTYPE_t* mu_ptr, DTYPE_t* Sigma_ptr, uint32_t covariance_type,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
     Implementation of KL-divergence energy function
@@ -381,8 +396,8 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         # log(det(sigma[j] / sigma[i]) = log det sigmaj - log det sigmai
         #   det = sigma ** K  SO
         # = K * (log(sigmaj) - log(sigmai)) = K * log(sigma j / sigmai)
-        det_fac = K * log(Sigma_ptr[j] / Sigma_ptr[i])
-        trace_fac = K * Sigma_ptr[j] / Sigma_ptr[i]
+        det_fac = K * log(sigma_ptr[j] / sigma_ptr[i])
+        trace_fac = K * sigma_ptr[j] / sigma_ptr[i]
 
         mu_diff_sq = 0.0
         for k in range(K):
@@ -390,21 +405,21 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
         return -0.5 * (
             trace_fac
-            + mu_diff_sq / Sigma_ptr[i]
+            + mu_diff_sq / sigma_ptr[i]
             - K - det_fac
         )
 
 cdef void kl_gradient(size_t i, size_t j,
-    DTYPE_t* dEdmui_ptr, DTYPE_t* dEdSigmai_ptr,
-    DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdSigmaj_ptr,
-    DTYPE_t* mu_ptr, DTYPE_t* Sigma_ptr, uint32_t covariance_type,
+    DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
+    DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
     Implementation of KL-divergence gradient
 
-    dEdmu and dEdSigma are used for return values.
+    dEdmu and dEdsigma are used for return values.
     They must hold enough space for the particular covariance matrix
-    (for spherical dEdSigma are floats, for diagonal are K dim arrays
+    (for spherical dEdsigma are floats, for diagonal are K dim arrays
     '''
     #   dE/dmu[i] = - dE/dmu[j] = -Delta'[i, j]
     #   dE/Sigma[i] = 0.5 * (
@@ -422,24 +437,24 @@ cdef void kl_gradient(size_t i, size_t j,
         # compute deltaprime and assign it to dEdmu
         sum_deltaprime2 = 0.0
         for k in xrange(K):
-            deltaprime = (1.0 / Sigma_ptr[i]) * (
+            deltaprime = (1.0 / sigma_ptr[i]) * (
                 mu_ptr[i * K + k] - mu_ptr[j * K + k])
             dEdmui_ptr[k] = -deltaprime
             dEdmuj_ptr[k] = deltaprime
             sum_deltaprime2 += deltaprime ** 2
 
-        dEdSigmai_ptr[0] = 0.5 * (
-            Sigma_ptr[j] * (1.0 / Sigma_ptr[i]) ** 2
+        dEdsigmai_ptr[0] = 0.5 * (
+            sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
             + sum_deltaprime2
-            - (1.0 / Sigma_ptr[i])
+            - (1.0 / sigma_ptr[i])
         )
-        dEdSigmaj_ptr[0] = 0.5 * (1.0 / Sigma_ptr[j] - 1.0 / Sigma_ptr[i])
+        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigma_ptr[j] - 1.0 / sigma_ptr[i])
 
 
 cdef void train_batch(
     uint32_t* pairs, size_t Npairs,
     energy_t energy_func, gradient_t gradient_func,
-    DTYPE_t* mu_ptr, DTYPE_t* Sigma_ptr, uint32_t covariance_type,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K,
     DTYPE_t eta, DTYPE_t Closs, DTYPE_t C, DTYPE_t m, DTYPE_t M,
     DTYPE_t* acc_grad_mu, DTYPE_t* acc_grad_sigma
@@ -463,8 +478,8 @@ cdef void train_batch(
     cdef DTYPE_t* work = <DTYPE_t*>malloc(K * 4 * sizeof(DTYPE_t))
     cdef DTYPE_t* dmui = work
     cdef DTYPE_t* dmuj = work + K
-    cdef DTYPE_t* dSigmai = work + 2 * K
-    cdef DTYPE_t* dSigmaj = work + 3 * K
+    cdef DTYPE_t* dsigmai = work + 2 * K
+    cdef DTYPE_t* dsigmaj = work + 3 * K
 
     for k in range(Npairs):
 
@@ -476,9 +491,9 @@ cdef void train_batch(
         negj = pairs[k * 4 + 3]
 
         pos_energy = energy_func(posi, posj,
-            mu_ptr, Sigma_ptr, covariance_type, N, K)
+            mu_ptr, sigma_ptr, covariance_type, N, K)
         neg_energy = energy_func(negi, negj, 
-            mu_ptr, Sigma_ptr, covariance_type, N, K)
+            mu_ptr, sigma_ptr, covariance_type, N, K)
         loss = Closs - pos_energy + neg_energy
 
         if loss < 1.0e-14:
@@ -499,23 +514,23 @@ cdef void train_batch(
 
             # compute the gradients
             gradient_func(i, j,
-                dmui, dSigmai, dmuj, dSigmaj,
-                mu_ptr, Sigma_ptr, covariance_type, N, K)
+                dmui, dsigmai, dmuj, dsigmaj,
+                mu_ptr, sigma_ptr, covariance_type, N, K)
 
-            _accumulate_update(i, dmui, dSigmai,
-                mu_ptr, Sigma_ptr, covariance_type,
+            _accumulate_update(i, dmui, dsigmai,
+                mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
-            _accumulate_update(j, dmuj, dSigmaj,
-                mu_ptr, Sigma_ptr, covariance_type,
+            _accumulate_update(j, dmuj, dsigmaj,
+                mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
 
     free(work)
 
 cdef void _accumulate_update(
-    size_t k, DTYPE_t* dmu, DTYPE_t* dSigma,
-    DTYPE_t* mu_ptr, DTYPE_t* Sigma_ptr, uint32_t covariance_type,
+    size_t k, DTYPE_t* dmu, DTYPE_t* dsigma,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     DTYPE_t fac, DTYPE_t eta, DTYPE_t C, DTYPE_t m, DTYPE_t M,
     DTYPE_t* acc_grad_mu, DTYPE_t* acc_grad_sigma,
     size_t N, size_t K
@@ -553,13 +568,13 @@ cdef void _accumulate_update(
     
     # now for Sigma
     if covariance_type == SPHERICAL:
-        acc_grad_sigma[k] += dSigma[0] ** 2
+        acc_grad_sigma[k] += dsigma[0] ** 2
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
-        Sigma_ptr[k] -= fac * local_eta * dSigma[0]
-        if Sigma_ptr[k] > M:
-            Sigma_ptr[k] = M
-        elif Sigma_ptr[k] < m:
-            Sigma_ptr[k] = m
+        sigma_ptr[k] -= fac * local_eta * dsigma[0]
+        if sigma_ptr[k] > M:
+            sigma_ptr[k] = M
+        elif sigma_ptr[k] < m:
+            sigma_ptr[k] = m
 
 cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
     text, random_gen, uint32_t half_window_size=2,

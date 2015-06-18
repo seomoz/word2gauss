@@ -13,7 +13,7 @@ def sample_embed():
         [1.0, -1.25],
         [-0.1, -0.4]
     ], dtype=DTYPE)
-    Sigma = np.array([
+    sigma = np.array([
         [1.0],
         [5.0],
         [0.8]
@@ -22,7 +22,7 @@ def sample_embed():
     return GaussianEmbedding(3, size=2,
         covariance_type='spherical',
         energy_type='KL',
-        mu=mu, Sigma=Sigma
+        mu=mu, sigma=sigma
     )
 
 class TestKLEnergy(unittest.TestCase):
