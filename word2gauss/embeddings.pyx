@@ -106,10 +106,15 @@ np.import_array()
 from libc.math cimport log, sqrt
 from libc.stdlib cimport malloc, free
 from libcpp.vector cimport vector
+from libcpp.string cimport string
 
 import logging
 import time
+import json
 import numpy as np
+
+from tarfile import open as open_tar
+from contextlib import closing
 
 from .utils import cosine
 
@@ -126,11 +131,7 @@ ctypedef np.float32_t DTYPE_t
 # types of covariance matrices we support
 cdef uint32_t SPHERICAL = 1
 #cdef uint32 DIAGONAL = 2 # maybe add diagonal in the future?
-
-# types of energy functions
-cdef uint32_t KL = 1
-# cdef uint32_t SYMMETRIC = 2
-
+COV_MAP = {1: 'spherical', 2: 'diagonal'}
 
 # define a generic interface for energy and gradient functions
 # (e.g. symmetric or KL-divergence).  This defines a type for the function...
@@ -160,6 +161,7 @@ cdef class GaussianEmbedding:
 
     cdef np.ndarray mu, sigma, acc_grad_mu, acc_grad_sigma
     cdef uint32_t covariance_type
+    cdef string energy_type
 
     # number of words, dimension of vectors
     cdef size_t N
@@ -219,7 +221,8 @@ cdef class GaussianEmbedding:
             self.covariance_type = SPHERICAL
         else:
             raise ValueError
-
+    
+        self.energy_type = energy_type
         if energy_type == 'KL':
             self.energy_func = <energy_t>kl_energy
             self.gradient_func = <gradient_t>kl_gradient
@@ -234,7 +237,7 @@ cdef class GaussianEmbedding:
         self.eta = eta
         self.Closs = Closs
 
-        # Initialize parameters 
+            # Initialize parameters 
         if mu is None:
             _mu = init_params['mu0'] * np.ascontiguousarray(
                 np.random.randn(self.N, self.K).astype(DTYPE))
@@ -299,10 +302,7 @@ cdef class GaussianEmbedding:
         The wordid is implicitly defined by the word_mu file, then
             assumed to align across the other files
         '''
-        import json
-
         from gzip import GzipFile
-        from tarfile import open as open_tar
         from tempfile import NamedTemporaryFile
 
         if not vocab:
@@ -344,6 +344,7 @@ cdef class GaussianEmbedding:
                 'N': self.N,
                 'K': self.K,
                 'covariance_type': self.covariance_type,
+                'energy_type': self.energy_type,
                 'sigma_min': self.sigma_min,
                 'sigma_max': self.sigma_max,
                 'mu_max': self.mu_max,
@@ -354,6 +355,79 @@ cdef class GaussianEmbedding:
                 tmp.write(json.dumps(params))
                 tmp.seek(0)
                 fout.add(tmp.name, arcname='parameters')
+
+    @classmethod
+    def load(cls, fname):
+        '''
+        Load the model from the saved tar ball (from a previous
+            call to save with full=True)
+        '''
+        # read in the parameters, construct the class, then read
+        # data and store it in class
+        with open_tar(fname, 'r') as fin:
+            with closing(fin.extractfile('parameters')) as f:
+                params = json.loads(f.read())
+
+            ret = cls(params['N'], size=params['K'],
+                covariance_type=COV_MAP[params['covariance_type']],
+                mu_max=params['mu_max'],
+                sigma_min=params['sigma_min'], sigma_max=params['sigma_max'],
+                energy_type=params['energy_type'],
+                eta=params['eta'], Closs=params['Closs'])
+
+        ret._data_from_file(fname)
+
+        return ret
+
+    def _data_from_file(self, fname):
+        '''
+        Set mu, sigma, acc_grad* from the saved file
+        '''
+        N = self.N
+        K = self.K
+
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
+
+        # set the data
+        with open_tar(fname, 'r') as fin:
+            _mu = np.empty((N, K), dtype=DTYPE)
+            with closing(fin.extractfile('word_mu')) as f:
+                for i, line in enumerate(f):
+                    ls = line.strip().split()
+                    # ls[0] is the word/id, skip it.  rest are mu
+                    _mu[i, :] = [float(ele) for ele in ls[1:]]
+
+            with closing(fin.extractfile('sigma')) as f:
+                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, -1).copy()
+            with closing(fin.extractfile('acc_grad_mu')) as f:    
+                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+            with closing(fin.extractfile('acc_grad_sigma')) as f:
+                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+
+        self.mu = _mu
+        assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
+        self.mu_ptr = &_mu[0, 0]
+
+        self.sigma = _sigma
+        assert self.sigma.flags['C_CONTIGUOUS'] and self.sigma.flags['OWNDATA']
+        self.sigma_ptr = &_sigma[0, 0]
+
+        self.acc_grad_mu = _acc_grad_mu
+        assert (
+            self.acc_grad_mu.flags['C_CONTIGUOUS'] and
+            self.acc_grad_mu.flags['OWNDATA']
+        )
+        self.acc_grad_mu_ptr = &_acc_grad_mu[0]
+
+        self.acc_grad_sigma = _acc_grad_sigma
+        assert (
+            self.acc_grad_sigma.flags['C_CONTIGUOUS'] and 
+            self.acc_grad_sigma.flags['OWNDATA']
+        )
+        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
     def nearest_neighbors(self, word_id, metric=cosine, num=10):
         '''Return the num nearest neighbors to word_id, using the metric
