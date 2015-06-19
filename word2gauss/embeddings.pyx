@@ -455,12 +455,15 @@ cdef class GaussianEmbedding:
         else:
             raise AttributeError
 
-    def train(self, iter_pairs, n_workers=1, report_interval=10):
+    def train(self, iter_pairs, n_workers=1, reporter=None, report_interval=10):
         '''
         Train the model from an iterator of many batches of pairs.
 
         use n_workers many workers
-        report_interval: report every this many batches
+        report_interval: report progress every this many batches,
+            if None then never report
+        if reporter is not None then it is called reporter(self, batch_number)
+            every time the report is run
         '''
         # threadpool implementation of training
         from Queue import Queue
@@ -485,11 +488,13 @@ cdef class GaussianEmbedding:
                 self.train_batch(pairs)
                 with lock:
                     processed[0] += 1
-                    if processed[0] >= processed[1]:
+                    if processed[1] and processed[0] >= processed[1]:
                         t2 = time.time()
                         LOGGER.info("Processed %s batches, elapsed time: %s"
                             % (processed[0], t2 - t1))
                         processed[1] = processed[0] + processed[2]
+                        if reporter:
+                            reporter(self, processed[0])
 
         # start threads
         threads = []
@@ -820,5 +825,4 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     next_pair += 1
 
     return np.ascontiguousarray(pairs[:next_pair, :])
-
 
