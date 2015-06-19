@@ -275,7 +275,7 @@ cdef class GaussianEmbedding:
         self.acc_grad_sigma = _acc_grad_sigma
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
-    def save(self, fname, vocab=None):
+    def save(self, fname, vocab=None, full=True):
         '''
         Writes a gzipped text file of the model in word2vec text format
 
@@ -284,14 +284,76 @@ cdef class GaussianEmbedding:
 
         This class doesn't have knowledge of id -> word mapping, so
         it can be passed in as a callable vocab(id) return the word string
+
+        if full=True, then writes out the full model.  It is a tar.gz
+        file the word vectors and Sigma files, in addition
+        to files for the other state (accumulated gradient for
+            training, model parameters)
+
+        It has files:
+            word_mu: the word2vec file with word/id and mu vectors
+            sigma: the sigma for each vector, one per line
+            acc_grad_mu and acc_grad_sigma: one value per line/word with
+                accumulated gradient sums
+            parameters: json file with model parameters (hyperparameters, etc)
+        The wordid is implicitly defined by the word_mu file, then
+            assumed to align across the other files
         '''
+        import json
+
         from gzip import GzipFile
+        from tarfile import open as open_tar
+        from tempfile import NamedTemporaryFile
+
         if not vocab:
             vocab = lambda x: x
-        with GzipFile(fname, 'w') as fout:
+
+        def write_word2vec(fout):
             for i in xrange(self.N):
                 line = [vocab(i)] + self.mu[i, :].tolist()
                 fout.write(' '.join('%s' % ele for ele in line) + '\n')
+
+        def save_array(a, name, fout):
+            with NamedTemporaryFile() as tmp:
+                np.savetxt(tmp, a, fmt='%s')
+                tmp.seek(0)
+                fout.add(tmp.name, arcname=name)
+
+        if not full:
+            with GzipFile(fname, 'w') as fout:
+                write_word2vec(fout)
+            return
+
+        # otherwise write the full file
+        # easiest way to manage is to write out to temp files then
+        # add to archive
+        with open_tar(fname, 'w:gz') as fout:
+            # word2vec file
+            with NamedTemporaryFile() as tmp:
+                write_word2vec(tmp)
+                tmp.seek(0)
+                fout.add(tmp.name, arcname='word_mu')
+
+            # sigma, accumulated gradient
+            save_array(self.sigma, 'sigma', fout)
+            save_array(self.acc_grad_mu, 'acc_grad_mu', fout)
+            save_array(self.acc_grad_sigma, 'acc_grad_sigma', fout)
+
+            # parameters
+            params = {
+                'N': self.N,
+                'K': self.K,
+                'covariance_type': self.covariance_type,
+                'sigma_min': self.sigma_min,
+                'sigma_max': self.sigma_max,
+                'mu_max': self.mu_max,
+                'eta': self.eta,
+                'Closs': self.Closs
+            }
+            with NamedTemporaryFile() as tmp:
+                tmp.write(json.dumps(params))
+                tmp.seek(0)
+                fout.add(tmp.name, arcname='parameters')
 
     def nearest_neighbors(self, word_id, metric=cosine, num=10):
         '''Return the num nearest neighbors to word_id, using the metric
