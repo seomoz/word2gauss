@@ -7,7 +7,7 @@ from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
 
 DTYPE = np.float32
 
-def sample_embed():
+def sample_embed(energy_type='KL'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
@@ -21,7 +21,7 @@ def sample_embed():
 
     return GaussianEmbedding(3, size=2,
         covariance_type='spherical',
-        energy_type='KL',
+        energy_type=energy_type,
         mu=mu, sigma=sigma
     )
 
@@ -36,6 +36,25 @@ class TestKLEnergy(unittest.TestCase):
         # energy = -KL divergence
         # 0 is closer to 2 then to 1
         self.assertTrue(-self.embed.energy(0, 2) < -self.embed.energy(0, 1))
+
+class TestIPEnergy(unittest.TestCase):
+    def setUp(self):
+        self.embed = sample_embed('IP')
+
+    def test_ip_energy_spherical(self):
+        # energy is log(P(0; mui - muj, Sigmai + Sigmaj)
+        # use scipy's multivariate_normal to get true probability
+        # then take log
+        from scipy.stats import multivariate_normal
+
+        mui = self.embed.mu[1, :]
+        muj = self.embed.mu[2, :]
+        sigma = np.diag(
+            (self.embed.sigma[1] + self.embed.sigma[2]) * np.ones(2))
+        expected = np.log(multivariate_normal.pdf(
+            np.zeros(2), mean=mui - muj, cov=sigma))
+        actual = self.embed.energy(1, 2)
+        self.assertAlmostEqual(actual, expected)
 
 
 class TestGaussianEmbedding(unittest.TestCase):

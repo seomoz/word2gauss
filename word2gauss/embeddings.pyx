@@ -197,7 +197,7 @@ cdef class GaussianEmbedding:
         N = number of distributions (e.g. number of words)
         size = dimension of each Gaussian
         covariance_type = 'spherical' or ...
-        energy_type = 'KL' or ...
+        energy_type = 'KL' or 'IP'
         mu_max = maximum L2 norm of each mu
         sigma_min, sigma_max = maximum/min eigenvalues of sigma
         init_params = {
@@ -226,6 +226,8 @@ cdef class GaussianEmbedding:
         if energy_type == 'KL':
             self.energy_func = <energy_t>kl_energy
             self.gradient_func = <gradient_t>kl_gradient
+        elif energy_type == 'IP':
+            self.energy_func = <energy_t>ip_energy
         else:
             raise ValueError
 
@@ -641,6 +643,42 @@ cdef void kl_gradient(size_t i, size_t j,
             - (1.0 / sigma_ptr[i])
         )
         dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigma_ptr[j] - 1.0 / sigma_ptr[i])
+
+
+cdef DTYPE_t ip_energy(size_t i, size_t j,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
+    size_t N, size_t K) nogil:
+    '''
+    Implementation of Inner product (symmetric) energy function
+
+    Returns log(E(i, j))
+    '''
+    # E(P[i], P[j]) = N(0; mu[i] - mu[j], Sigma[i] + Sigma[j])
+    # and use log(E) =
+    #   -0.5 log det(sigma[i] + sigma[j])
+    #   - 0.5 * (mu[i] - mu[j]) * (sigma[i] + sigma[j]) ** -1 * (mu[i]-mu[j])
+    #   - K / 2 * log(2 * pi)
+
+    cdef DTYPE_t log_2_pi = 1.8378770664093453
+    cdef DTYPE_t det_fac
+    cdef DTYPE_t mu_diff_sq
+    cdef size_t k
+
+    if covariance_type == SPHERICAL:
+        # log(det(sigma[i] + sigma[j]))
+        # = log ((sigma[i] + sigma[j]) ** K)
+        # = K * log(sigmai + sigmaj)
+        det_fac = K * log(sigma_ptr[i] + sigma_ptr[j])
+
+        mu_diff_sq = 0.0
+        for k in range(K):
+            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2
+
+        return -0.5 * (
+            det_fac +
+            mu_diff_sq / (sigma_ptr[i] + sigma_ptr[j]) +
+            K * log_2_pi
+        )
 
 
 cdef void train_batch(
