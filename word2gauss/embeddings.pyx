@@ -788,10 +788,12 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
         pairs
     '''
     # calculate number of windows we need
-    # need all positive indices in half_window_size for each word, except
-    # words at end, so this slightly overestimates number of pairs
+    # for each token, take all positive indices in half_window_size
+    # and take two samples from it (one for left token, one for right token)
+    # for each nsamples_per_word.  Note that this includes full windows
+    # for words at end, so it slightly overestimates number of pairs
     cdef long long npairs = sum(
-        [len(doc) * half_window_size * nsamples_per_word for doc in text]
+        [2 * len(doc) * half_window_size * nsamples_per_word for doc in text]
     )
 
     # allocate pairs and draw random numbers
@@ -816,12 +818,20 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     # OOV word
                     continue
                 # take nsamples_per_word samples
+                # we ignore handling the case where sample is i or j, for now
                 for k in range(nsamples_per_word):
+                    # sample j
                     pairs[next_pair, 0] = cdoc[i]
                     pairs[next_pair, 1] = cdoc[j]
                     pairs[next_pair, 2] = cdoc[i]
-                    # ignore case where sample is i or j for now
                     pairs[next_pair, 3] = randids[next_pair]
+                    next_pair += 1
+
+                    # now sample i
+                    pairs[next_pair, 0] = cdoc[i]
+                    pairs[next_pair, 1] = cdoc[j]
+                    pairs[next_pair, 2] = randids[next_pair]
+                    pairs[next_pair, 3] = cdoc[j]
                     next_pair += 1
 
     return np.ascontiguousarray(pairs[:next_pair, :])
