@@ -239,7 +239,7 @@ cdef class GaussianEmbedding:
         self.eta = eta
         self.Closs = Closs
 
-            # Initialize parameters 
+        # Initialize parameters 
         if mu is None:
             _mu = init_params['mu0'] * np.ascontiguousarray(
                 np.random.randn(self.N, self.K).astype(DTYPE))
@@ -434,13 +434,27 @@ cdef class GaussianEmbedding:
     def nearest_neighbors(self, word_id, metric=cosine, num=10):
         '''Return the num nearest neighbors to word_id, using the metric
 
-        Metric has this interface:
+        Metric is either 'IP', 'KL' or is callable with this interface:
             array(N) with similarities = metric(
                 array(N, K) of all vectors, array(K) of word_id
             )
+        Default is cosine similarity.
+
         Returns (top num ids, top num scores)
         '''
-        scores = metric(self.mu, self.mu[word_id, :].reshape(1, -1))
+        if metric == 'IP':
+            scores = np.zeros(self.N)
+            for k in xrange(self.N):
+                scores[k] = self.energy(k, word_id, func=metric)
+        elif metric == 'KL':
+            scores = np.zeros(self.N)
+            for k in xrange(self.N):
+                scores[k] = 0.5 * (
+                    self.energy(k, word_id, func=metric)
+                    + self.energy(word_id, k, func=metric)
+                )
+        else:
+            scores = metric(self.mu, self.mu[word_id, :].reshape(1, -1))
         sorted_indices = scores.argsort()[::-1][:(num + 1)]
         top_indices = [ele for ele in sorted_indices if ele != word_id]
         return top_indices, scores[top_indices]
@@ -533,15 +547,30 @@ cdef class GaussianEmbedding:
                 self.acc_grad_mu_ptr, self.acc_grad_sigma_ptr
             )
 
-    def energy(self, i, j):
+    def energy(self, i, j, func=None):
         '''
         Compute the energy between i and j
 
         This a wrapper around the cython code for convenience
+
+        If func==None (default) then use self.energy_type, otherwise
+            use the specified type
         '''
-        return self.energy_func(i, j,
-            self.mu_ptr, self.sigma_ptr, self.covariance_type,
-            self.N, self.K)
+        cdef energy_t efunc
+        if func is None:
+            return self.energy_func(i, j,
+                self.mu_ptr, self.sigma_ptr, self.covariance_type,
+                self.N, self.K)
+        else:
+            if func == 'IP':
+                efunc = <energy_t>ip_energy
+            elif func == 'KL':
+                efunc = <energy_t>kl_energy
+            else:
+                raise ValueError
+            return efunc(i, j,
+                self.mu_ptr, self.sigma_ptr, self.covariance_type,
+                self.N, self.K)
 
     def gradient(self, i, j):
         '''
