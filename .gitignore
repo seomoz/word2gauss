@@ -8,5 +8,7 @@ build/*
 # cython generated
 word2gauss/embeddings.cpp
 
+.coverage
+
 
 
