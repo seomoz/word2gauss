@@ -1,24 +1,6 @@
 #cython: boundscheck=False, wraparound=False, embedsignature=True, cdivision=True
 
-
-# have words/tokens w[i], i = 1 .. N
-# Each word has probability P[i] = gaussian
-# The Gaussian is parameterized by
-#
-#   P ~ N(x; mu[i], Sigma[i])
-#
-# where mu[i] = vector length K
-# Sigma[i] = covariance matrix = (K, K) array
-#
-# Make two approximations to simply Sigma[i]:
-#
-# Either it's 'diagonal' in which case Sigma[i] can be represented by
-#   sigma[i] = vector length K
-# OR 'spherical' = diagonal with every element the same when Sigma[i] = float
-#
-#
-# Now define Energy function E(P[i], P[j]) = similarity like measure of
-# the two probabilities.
+# Two different energies:
 #
 # Have inner product based energy (Expected Likelihood, EL)
 #
@@ -52,52 +34,7 @@
 #       dE(P[i_neg], P[j_neg])
 #
 
-#  for each loss need:
-#  functions to compute E(i, j) and dE/dparam
-#  This depends on the parameterization for sigma so two parameterizations,
-#  two losses = 4 X code (bad)
-
-# Model class:
-# map word -> id
-# numpy array (nwords, ndim of vector) for means
-# covariance: numpy array (nwords, ndim of vector) for diagonal
-#                         (nwords, 1) for spherical
-# Break off means / covariance into a separate Distribution class
-# Bundle with vocab / tokenizer / etc
-
-# Distribution class:
-#  holds arrays and covariances of different types
-#  also holds the model parameters
-# public methods:
-#   .covariance_type = '...' attribute
-#   .mu = numpy array of mus
-#   .Sigma = appropriately sized array for Sigma
-#  probablility of a given vector
-#
-# Model class holds a distribution class + vocab + tokenizer, etc
-#
-# To train Distribution:
-# initialize with size of vocab and random weights
-# has method:
-# def train(self, iterator of postive and negative pairs, e.g.
-#   iterator of [(i_pos, j_pos), (i_neg, j_neg)])
-
-# Inside train:
-# Split pairs into minibatches
-# In each batch:
-#   iterate through pairs
-#       compute gradients
-#       get learning rate, update global parameters, update learning rate
-
-# read through sentences:
-#   split into batches
-#   in each batch:
-#       for each sentence
-#           read through words and accumulate gradient
-#       update global parameters with accumulated gradient
-#
 # NOTE: C/C++ is row major (so A[i, :] is contiguous)
-#
 
 cimport cython
 cimport numpy as np
@@ -158,20 +95,51 @@ ctypedef void (*gradient_t)(size_t, size_t,
 
 
 cdef class GaussianEmbedding:
+    '''
+    Represent words as gaussian distributions
 
+    Holds model parameters, deals with serialization and learning.
+    Attributes:
+        N = number of words
+        K = dimension of each representation
+        mu = (N, K)
+        sigma = either (N, 1) array (for spherical) or (N, K) (for diagonal)
+            NOTE: diagnonal case not implemented yet
+        acc_grad_mu = (N, ) array, the accumulated gradients for each
+            mu update
+        acc_grad_sigma = (N, ) array, the accumulated gradients for each
+            sigma
+
+    Since we use Cython we also store the C pointer to the underlying
+    raw data.
+    '''
+
+    # the numpy arrays holding data as described above
+    # NOTE: the Cython code assumes the data is stored in C contiguous order
+    # and asserted on creation 
     cdef np.ndarray mu, sigma, acc_grad_mu, acc_grad_sigma
+
+    # the covariance type as defined above
     cdef uint32_t covariance_type
+
+    # either 'IP' or 'KL'
     cdef string energy_type
 
-    # number of words, dimension of vectors
+    # number of words
     cdef size_t N
+    # dimension of vectors
     cdef size_t K
 
     # L2 regularization parameters
-    cdef DTYPE_t mu_max, sigma_min, sigma_max
+    # mu_max = max L2 norm of mu
+    cdef DTYPE_t mu_max
+    # min and max L2 norm of Sigma (= max/min entries on the diagonal)
+    cdef DTYPE_t sigma_min, sigma_max
 
-    # training parameters
-    cdef DTYPE_t eta, Closs
+    # global learning rate
+    cdef DTYPE_t eta
+    # the Closs in max-margin function
+    cdef DTYPE_t Closs
 
     # energy and gradient functions
     cdef energy_t energy_func
