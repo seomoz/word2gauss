@@ -1,9 +1,8 @@
 # word2gauss
 Gaussian word embeddings
 
-Python/Cython implementation of [http://arxiv.org/abs/1412.6623](Luke
-Vilnis and Andrew McCallum
-<i>Word Representations via Gaussian Embedding</i>, ICLR 2015)
+Python/Cython implementation of [Luke Vilnis and Andrew McCallum
+<i>Word Representations via Gaussian Embedding</i>, ICLR 2015](http://arxiv.org/abs/1412.6623)
 that represents each word as a multivariate Gaussian.
 Scales to large corpora using Cython extensions and threading with asynchronous
 stochastic gradient descent (Adagrad).
@@ -48,7 +47,7 @@ vocab = Vocabulary(...)
 ## Background details
 Instead of representing a word as a vector as in `word2vec`, `word2gauss`
 represents each word as a multivariate Gaussian.  Assume some dictionary
-of known tokens `w[i], i = 1 .. N`, we represent each word with
+of known tokens `w[i], i = 0 .. N-1`, we represent each word with
 a probability `P[i]`, a `K` dimensional Gaussian parameterized by
 ```
    P[i] ~ N(x; mu[i], Sigma[i])
@@ -73,4 +72,20 @@ to make `Delta E` positive.  Formally, use a max-margin loss:
 and optimize the parameters to minimize the sum of the loss over
 the entire training set of positive/negative pairs.
 
+To generate the training pairs, use co-occuring words as the positive
+examples and a randomly sampled words as the negative examples.
+Since the energy function is potentially asymmetric, for each co-occuring
+word pair randomly sample both the left and right tokens for negative
+examples.  In addition, we allow the option to generate several
+sets of training pairs from each word.
+In pseudo-code:
+```
+for sentence in corpus:
+    for i in len(sentence):
+        for k in 1..window_size:
+            for nsample in 1..number_of_samples_per_word:
+                positive pair = (left, right) = (sentence[i], sentence[i + k])
+                negative pairs = [(left, random ID), (random ID, right)]
+                update model weights
+```
 
