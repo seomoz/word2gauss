@@ -636,7 +636,7 @@ cdef void kl_gradient(size_t i, size_t j,
 
         dEdsigmai_ptr[0] = 0.5 * (
             sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
-            + sum_deltaprime2
+            + sum_deltaprime2 / K
             - (1.0 / sigma_ptr[i])
         )
         dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigma_ptr[j] - 1.0 / sigma_ptr[i])
