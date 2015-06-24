@@ -3,5 +3,6 @@ python:
   - 2.7
 script: make test
 install:
-  - pip install -r requirements.txt --use-mirrors
+  - apt-get install python-scipy
+  - pip install -r requirements.txt
   - python setup.py build_ext --inplace

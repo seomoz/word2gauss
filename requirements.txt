@@ -1,4 +1,3 @@
 nose
 coverage
-scipy
 Cython>=0.21.1
