@@ -1,7 +1,9 @@
 language: python
+sudo: required
 python:
   - 2.7
 script: make test
 install:
+  - sudo apt-get install libatlas-base-dev
   - pip install -r requirements.txt
   - python setup.py build_ext --inplace
