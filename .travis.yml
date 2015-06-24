@@ -1,8 +1,9 @@
 language: python
+sudo: required
 python:
   - 2.7
 script: make test
 install:
-  - apt-get install python-scipy
+  - sudo apt-get install python-scipy
   - pip install -r requirements.txt
   - python setup.py build_ext --inplace
