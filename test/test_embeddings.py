@@ -89,13 +89,34 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         return training_data
 
-    def test_train_batch(self):
+    def test_train_batch_KL(self):
         training_data = self._training_data()
 
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
             mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+        )
+
+        for k in xrange(0, len(training_data), 100):
+            embed.train_batch(training_data[k:(k+100)])
+
+        # should have 0 - 1 close together and 0..1 - 2..9 far apart
+        # should also have 2..9 all near each other
+        neighbors0, scores0 = embed.nearest_neighbors(0, num=10)
+        self.assertEqual(neighbors0[0], 1)
+
+        # check nearest neighbors to 2, the last two should be 0, 1
+        neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
+        self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
+
+    def test_train_batch_inner_product(self):
+        training_data = self._training_data()
+
+        embed = GaussianEmbedding(10, 5,
+            covariance_type='spherical',
+            energy_type='IP',
+            mu_max=1.0, sigma_min=0.8, sigma_max=1.2, eta=1.0, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):

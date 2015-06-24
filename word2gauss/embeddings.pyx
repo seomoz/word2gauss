@@ -196,6 +196,7 @@ cdef class GaussianEmbedding:
             self.gradient_func = <gradient_t>kl_gradient
         elif energy_type == 'IP':
             self.energy_func = <energy_t>ip_energy
+            self.gradient_func = <gradient_t>ip_gradient
         else:
             raise ValueError
 
@@ -626,6 +627,11 @@ cdef void kl_gradient(size_t i, size_t j,
 
     if covariance_type == SPHERICAL:
         # compute deltaprime and assign it to dEdmu
+        # Note:
+        # Delta'[i, j] * Delta'[i, j].T is a dense K x K matrix, but we
+        # only have one parameter that is tied along the diagnonal.
+        # so, use the average of the diagnonal elements of the full
+        # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
         for k in xrange(K):
             deltaprime = (1.0 / sigma_ptr[i]) * (
@@ -676,6 +682,39 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
             mu_diff_sq / (sigma_ptr[i] + sigma_ptr[j]) +
             K * log_2_pi
         )
+
+cdef void ip_gradient(size_t i, size_t j,
+    DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
+    DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
+    DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
+    size_t N, size_t K) nogil:
+    '''
+    Implementation of Inner product based gradient
+    '''
+    #   dE/dmu[i] = - dE/dmu[j] = -Delta[i, j]
+    #   dE/dSigma[i] = dE/dSigma[j] = 0.5 * (
+    #   Delta[i, j] * Delta[i, j].T - (Sigma[i] + Sigma[j]) ** -1)
+    #   Delta[i, j] = ((Sigma[i] + Sigma[j]) ** -1) * (mu[i] - mu[j])
+    cdef DTYPE_t delta, sigmai_plus_sigmaj_inv, sum_delta2
+    cdef size_t k
+
+    if covariance_type == SPHERICAL:
+        # compute delta and assign it to dEdmu
+        sigmai_plus_sigmaj_inv = 1.0 / (sigma_ptr[i] + sigma_ptr[j])
+        # we'll sum up delta ** 2 too
+        sum_delta2 = 0.0
+        for k in xrange(K):
+            delta = sigmai_plus_sigmaj_inv * (
+                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            dEdmui_ptr[k] = -delta
+            dEdmuj_ptr[k] = delta
+            sum_delta2 += delta ** 2
+
+        dEdsigmai_ptr[0] = 0.5 * (
+            + sum_delta2 / K
+            - sigmai_plus_sigmaj_inv
+        )
+        dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 
 
 cdef void train_batch(
