@@ -89,6 +89,18 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         return training_data
 
+    def _check_results(self, embed):
+        # should have 0 - 1 close together and 0..1 - 2..9 far apart
+        # should also have 2..9 all near each other
+        neighbors0 = embed.nearest_neighbors(0, num=10)
+        # neighbors[0] is 0
+        self.assertEqual(neighbors0[1]['id'], 1)
+
+        # check nearest neighbors to 2, the last two should be 0, 1
+        neighbors2 = embed.nearest_neighbors(2, num=10)
+        last_two_ids = sorted([result['id'] for result in neighbors2[-2:]])
+        self.assertEqual(sorted(last_two_ids), [0, 1])
+
     def test_train_batch_KL(self):
         training_data = self._training_data()
 
@@ -101,14 +113,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         for k in xrange(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
-        # should have 0 - 1 close together and 0..1 - 2..9 far apart
-        # should also have 2..9 all near each other
-        neighbors0, scores0 = embed.nearest_neighbors(0, num=10)
-        self.assertEqual(neighbors0[0], 1)
-
-        # check nearest neighbors to 2, the last two should be 0, 1
-        neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
-        self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
+        self._check_results(embed)
 
     def test_train_batch_inner_product(self):
         training_data = self._training_data()
@@ -122,14 +127,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         for k in xrange(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
-        # should have 0 - 1 close together and 0..1 - 2..9 far apart
-        # should also have 2..9 all near each other
-        neighbors0, scores0 = embed.nearest_neighbors(0, num=10)
-        self.assertEqual(neighbors0[0], 1)
-
-        # check nearest neighbors to 2, the last two should be 0, 1
-        neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
-        self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
+        self._check_results(embed)
 
     def test_train_threads(self):
         training_data = self._training_data()
@@ -146,15 +144,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         embed.train(iter_pairs(), n_workers=4)
 
-        # should have 0 - 1 close together and 0..1 - 2..9 far apart
-        # should also have 2..9 all near each other
-        neighbors0, scores0 = embed.nearest_neighbors(0, num=10)
-        self.assertEqual(neighbors0[0], 1)
-
-        # check nearest neighbors to 2, the last two should be 0, 1
-        neighbors2, scores2 = embed.nearest_neighbors(2, num=10)
-        self.assertEqual(sorted(neighbors2[-2:]), [0, 1])
-
+        self._check_results(embed)
 
 class TestTexttoPairs(unittest.TestCase):
     def test_text_to_pairs(self):

@@ -400,33 +400,65 @@ cdef class GaussianEmbedding:
         )
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
-    def nearest_neighbors(self, word_id, metric=cosine, num=10):
-        '''Return the num nearest neighbors to word_id, using the metric
+    def nearest_neighbors(self, target, metric=cosine, num=10, vocab=None,
+            sort_order='similarity'):
+        '''Find nearest neighbors.
 
-        Metric is either 'IP', 'KL' or is callable with this interface:
+        target defines the embedding to which we'll find neighbors.  It
+        can take a number of different forms depending on use case:
+
+            * if target = uint32 it is interpreted as as word_id
+            * if target = [(tuple of uint32), (tuple of uint32)] then
+                it is interpreted as a list of "positive" and "negative"
+                word_ids.  The first tuple lists positive word_ids and
+                the second negative word_ids
+            * if target = string then vocab is used to find the corresponding
+                word_id
+            * if target = [(tuple of strings), (tuple of strings)] then
+                it is interpreted as positive and negative words
+
+        Metric is callable with this interface:
             array(N) with similarities = metric(
                 array(N, K) of all vectors, array(K) of word_id
             )
         Default is cosine similarity.
 
-        Returns (top num ids, top num scores)
+        vocab: if provided, is an object with callable methods: word2id and
+            id2word translate from strings to word_ids and vice versa.
+
+        sort_order = either 'similarity' or 'sigma'.  If 'similarity'
+            then sorts results by descending metric, if 'sigma' then
+            sort results by increasing sigma
         '''
-        if metric == 'IP':
-            scores = np.zeros(self.N)
-            for k in xrange(self.N):
-                scores[k] = self.energy(k, word_id, func=metric)
-        elif metric == 'KL':
-            scores = np.zeros(self.N)
-            for k in xrange(self.N):
-                scores[k] = 0.5 * (
-                    self.energy(k, word_id, func=metric)
-                    + self.energy(word_id, k, func=metric)
-                )
+        # find the distribution to compare similarity to
+        if isinstance(target, basestring):
+            t = self.mu[vocab.word2id(target), :]
+        elif isinstance(target, list):
+            # positive and negative indices
+            t = np.zeros(self.K)
+            for pos_neg, fac in zip(target, [1.0, -1.0]):
+                for word_or_id in pos_neg:
+                    if isinstance(word_or_id, basestring):
+                        word_id = vocab.word2id(word_or_id)
+                    else:
+                        word_id = word_or_id
+                    t += fac * self.mu[word_id, :]
         else:
-            scores = metric(self.mu, self.mu[word_id, :].reshape(1, -1))
-        sorted_indices = scores.argsort()[::-1][:(num + 1)]
-        top_indices = [ele for ele in sorted_indices if ele != word_id]
-        return top_indices, scores[top_indices]
+            t = self.mu[target, :]
+
+        scores = metric(self.mu, t.reshape(1, -1))
+        top_indices = scores.argsort()[::-1][:num]
+        ret = [
+            {'id': ind, 'similarity': scores[ind], 'sigma': self.sigma[ind, :]}
+            for ind in top_indices
+        ]
+        if vocab is not None:
+            for k, ind in enumerate(top_indices):
+                ret[k]['word'] = vocab.id2word(ind)
+        if sort_order == 'sigma':
+            ret.sort(key=lambda x: x['sigma'].prod())
+
+        return ret
 
     def __getattr__(self, name):
         if name == 'mu':
