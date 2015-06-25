@@ -10,8 +10,8 @@ with asynchronous stochastic gradient descent (Adagrad).
 ## Getting started
 
 ### Installing
-Install the packages in `requirements.txt` then `make install`.  `make test`
-runs the test suite.
+First install numpy, scipy and the packages in `requirements.txt`.
+Then `make install`.  `make test` runs the test suite.
 
 ### Code overview
 The `GaussianEmbedding` class is the main workhorse for most tasks.  It
