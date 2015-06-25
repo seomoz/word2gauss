@@ -4,6 +4,6 @@ python:
   - 2.7
 script: make test
 install:
-  - sudo apt-get install libatlas-base-dev
+  - sudo apt-get install libatlas-base-dev gfortran
   - pip install -r requirements.txt
   - python setup.py build_ext --inplace
