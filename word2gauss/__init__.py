@@ -1,3 +1,4 @@
 
-from .embeddings import GaussianEmbedding, text_to_pairs
+from .embeddings import GaussianEmbedding
+from .words import iter_pairs
 

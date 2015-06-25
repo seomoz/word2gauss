@@ -10,7 +10,8 @@ stochastic gradient descent (Adagrad).
 ## Getting started
 
 ### Installing
-TODO
+Install the packages in `requirements.txt` then `make install`.  `make test`
+runs the test suite.
 
 ### Code overview
 The `GaussianEmbedding` class is the main workhorse for most tasks.  It
@@ -26,21 +27,60 @@ For learning word embeddings, the token - id mapping is off-loaded to a
 and provides the ability to draw a random `token_id` from the
 token distribution.  The random generator is necessary for the negative
 sampling needed to generate training positive/negative pairs from a sentence
-(see details below).
+(see details below).  We assume the `Vocabulary` has these methods:
+
+    * `tokenize(text)` returns a numpy array of token IDs in the text or -1 for OOV tokens
+    * `random_ids(N)` returns a length N numpy array of random IDs
+    * `word2id(string)` and `id2word(uint32)` map from string <-> id
+    * `__len__(self)` returns number of words in vocabulary
+
 
 ### Learning embeddings
 
+To learn embeddings, you will need a suitable corpus and an implementation
+of the `Vocabulary` interface.
+
 ```python
-from word2gauss import GaussianEmbedding, text_to_pairs
+from gzip import GzipFile
+
+from word2gauss import GaussianEmbedding, iter_pairs
 from vocab import Vocabulary
 
-# the Vocabulary class has this interface:
-# vocab.tokenize(text) returns a numpy array of token IDs in the text
-#   or -1 for OOV tokens
-# vocab.random_ids(N) returns a length N numpy array of random IDs
+# load the vocabulary
 vocab = Vocabulary(...)
 
-# TODO - loop through corpus, batch documents, call train
+# create the embedding to train
+# use 100 dimensional spherical Gaussian with KL-divergence as energy function
+embed = GaussianEmbedding(len(vocab), 100,
+    covariance_type='spherical', energy_type='KL')
+
+# open the corpus and train with 8 threads
+# the corpus is just an iterator of documents, here a new line separated
+# gzip file for example
+with GzipFile('location_of_corpus', 'r') as corpus:
+    embed.train(iter_pairs(corpus, vocab), n_workers=8)
+
+# save the model for later
+embed.save('model_file_location', vocab=vocab.id2word, full=True)
+```
+
+### Examining trained models
+```python
+from word2gauss import GaussianEmbedding
+from vocab import Vocabulary
+
+# load in a previously trained model and the vocab
+vocab = Vocabulary(...)
+embed = GaussianEmbedding.load('model_file_location')
+
+# find nearest neighbors to 'rock'
+embed.nearest_neighbors('rock', vocab=vocab)
+
+# find nearest neighbors to 'rock' sorted by covariance
+embed.nearest_neighbors('rock', num=100, vocab=vocab)
+
+# solve king + woman - man = ??
+embed.nearest_neighbors([['king', 'woman'], ['man']], num=10, vocab=vocab)
 ```
 
 
@@ -59,6 +99,8 @@ approximations to simply `Sigma[i]`:
 
 * 'diagonal' in which case `Sigma[i]` is a vector length `K`
 * 'spherical' in which case `Sigma[i]` is a single float
+
+**Note:** only the 'spherical' case is currently implemented.
 
 To learn the probabilities, first define an energy function 
 `E(P[i], P[j])` that returns a similarity like measure of the two
