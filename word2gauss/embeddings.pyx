@@ -260,7 +260,7 @@ cdef class GaussianEmbedding:
         it can be passed in as a callable vocab(id) return the word string
 
         if full=True, then writes out the full model.  It is a tar.gz
-        file the word vectors and Sigma files, in addition
+        file with the word vectors and Sigma files, in addition
         to files for the other state (accumulated gradient for
             training, model parameters)
 

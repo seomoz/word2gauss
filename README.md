@@ -95,7 +95,7 @@ a probability `P[i]`, a `K` dimensional Gaussian parameterized by
 Here, `mu[i]` and `Sigma[i]` are the mean and co-variance matrix
 for word `i`.  The mean is a vector of length `K` and in the most general
 case `Sigma[i]` is a `(K, K)` matrix.  The paper makes one of two
-approximations to simply `Sigma[i]`:
+approximations to simplify `Sigma[i]`:
 
 * 'diagonal' in which case `Sigma[i]` is a vector length `K`
 * 'spherical' in which case `Sigma[i]` is a single float
