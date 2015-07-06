@@ -1,0 +1,14 @@
+
+*.pyc
+*.so
+build/*
+
+*.swp
+
+# cython generated
+word2gauss/embeddings.cpp
+
+.coverage
+
+
+
