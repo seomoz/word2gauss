@@ -119,6 +119,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         self.embed = sample_embed()
         self.embed.update(5)
         self.assertEquals(self.embed.mu.shape, (5, 2))
+        self.assertEquals(self.embed.sigma.shape, (5, 1))
 
     def test_train_batch_inner_product(self):
         training_data = self._training_data()
