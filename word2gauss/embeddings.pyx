@@ -273,7 +273,7 @@ cdef class GaussianEmbedding:
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
         LOGGER.info("New vocab size %i" % N)
         LOGGER.info("Old vocab size %i" % self.mu.shape[0])
-        if N > self.mu.shape[0]:
+        if N > self.N:
 
             if self.covariance_type == SPHERICAL:
                 LOGGER.info("covariance is spherical")
@@ -282,7 +282,7 @@ cdef class GaussianEmbedding:
 
             # there are new words in the vocabulary
             # add more rows
-            n_words = N - self.mu.shape[0]
+            n_words = N - self.N
             LOGGER.info("%i new words" % n_words)
 
             # update mu with n_words more rows initialized randomly
@@ -330,9 +330,9 @@ cdef class GaussianEmbedding:
             self.acc_grad_sigma = _acc_grad_sigma
             self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
             LOGGER.info("acc_grad_sigma pointer updated ")
-            # Uncomment lines after we figure out what is going on with self.N
-            # self.N = self.mu.shape[0]
-            # LOGGER.info("Updated N")
+
+            self.N = N
+            LOGGER.info("N Updated")
 
 
     def save(self, fname, vocab=None, full=True):
@@ -555,6 +555,8 @@ cdef class GaussianEmbedding:
             return self.acc_grad_mu
         elif name == 'acc_grad_sigma':
             return self.acc_grad_sigma
+        elif name == 'N':
+            return self.N
         else:
             raise AttributeError
 
