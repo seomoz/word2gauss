@@ -255,7 +255,9 @@ cdef class GaussianEmbedding:
             'sigma_std0': 1.0
         }):
         '''
-        This function adds to the current np arrays: mu, sigma, acc_grad_mu and acc_grad_sigma to account for any new vocabulary that we need to introduce to the model for retraining.
+        This function adds to the current np arrays: mu, sigma, acc_grad_mu
+        and acc_grad_sigma to account for any new vocabulary that we need to
+         introduce to the model for retraining.
 
         If the original size of the vocabulary is N, and the new size is M
         It adds new rows to self.mu to make it M x K
@@ -300,8 +302,8 @@ cdef class GaussianEmbedding:
             LOGGER.info("sigma updated with %i new rows" % n_words)
             self.sigma = _sigma
 
-            assert _mu.flags['C_CONTIGUOUS']
-            assert _sigma.flags['C_CONTIGUOUS']
+            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
+            assert _sigma.flags['C_CONTIGUOUS'] and _sigma.flags['OWNDATA']
 
             # updating pointers
             self.mu_ptr = &_mu[0, 0]
@@ -313,6 +315,8 @@ cdef class GaussianEmbedding:
                 np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
             LOGGER.info("acc_grad_mu updated with %i new rows" % n_words)
 
+            assert _acc_grad_mu.flags['C_CONTIGUOUS'] and \
+                _acc_grad_mu.flags['OWNDATA']
             self.acc_grad_mu = _acc_grad_mu
             self.acc_grad_mu_ptr = &_acc_grad_mu[0]
             LOGGER.info("acc_grad_mu pointer updated ")
@@ -321,10 +325,11 @@ cdef class GaussianEmbedding:
             _acc_grad_sigma = np.append(self.acc_grad_sigma, np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
             LOGGER.info("acc_grad_sigma updated with %i new rows" % n_words)
 
+            assert _acc_grad_sigma.flags['C_CONTIGUOUS'] and \
+                _acc_grad_sigma.flags['OWNDATA']
             self.acc_grad_sigma = _acc_grad_sigma
             self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
             LOGGER.info("acc_grad_sigma pointer updated ")
-
             # Uncomment lines after we figure out what is going on with self.N
             # self.N = self.mu.shape[0]
             # LOGGER.info("Updated N")
