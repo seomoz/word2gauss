@@ -254,6 +254,17 @@ cdef class GaussianEmbedding:
             'sigma_mean0': 0.5,
             'sigma_std0': 1.0
         }):
+        '''
+        This function adds to the current np arrays: mu, sigma, acc_grad_mu and acc_grad_sigma to account for any new vocabulary that we need to introduce to the model for retraining.
+
+        If the original size of the vocabulary is N, and the new size is M
+        It adds new rows to self.mu to make it M x K
+        It increases the size of the other M x 1 dimensional arrays.
+
+        self = embeddings model
+        N = Total size of the vocabulary
+        init_params = initialization parameters to initialize new rows
+        '''
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
@@ -261,6 +272,11 @@ cdef class GaussianEmbedding:
         LOGGER.info("New vocab size %i" % N)
         LOGGER.info("Old vocab size %i" % self.mu.shape[0])
         if N > self.mu.shape[0]:
+
+            if self.covariance_type == SPHERICAL:
+                LOGGER.info("covariance is spherical")
+            else:
+                raise ValueError
 
             # there are new words in the vocabulary
             # add more rows
@@ -284,6 +300,9 @@ cdef class GaussianEmbedding:
             LOGGER.info("sigma updated with %i new rows" % n_words)
             self.sigma = _sigma
 
+            assert _mu.flags['C_CONTIGUOUS']
+            assert _sigma.flags['C_CONTIGUOUS']
+
             # updating pointers
             self.mu_ptr = &_mu[0, 0]
             self.sigma_ptr = &_sigma[0, 0]
@@ -305,6 +324,10 @@ cdef class GaussianEmbedding:
             self.acc_grad_sigma = _acc_grad_sigma
             self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
             LOGGER.info("acc_grad_sigma pointer updated ")
+
+            # Uncomment lines after we figure out what is going on with self.N
+            # self.N = self.mu.shape[0]
+            # LOGGER.info("Updated N")
 
 
     def save(self, fname, vocab=None, full=True):
@@ -719,7 +742,7 @@ cdef void kl_gradient(size_t i, size_t j,
         # compute deltaprime and assign it to dEdmu
         # Note:
         # Delta'[i, j] * Delta'[i, j].T is a dense K x K matrix, but we
-        # only have one parameter that is tied along the diagnonal.
+        # only have one parameter that is tied along the diagonal.
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
