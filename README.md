@@ -41,6 +41,9 @@ To learn embeddings, you will need a suitable corpus and an implementation
 of the `Vocabulary` interface.
 
 ```python
+import logging
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+
 from gzip import GzipFile
 
 from word2gauss import GaussianEmbedding, iter_pairs
@@ -102,7 +105,7 @@ approximations to simplify `Sigma[i]`:
 
 **Note:** only the 'spherical' case is currently implemented.
 
-To learn the probabilities, first define an energy function 
+To learn the probabilities, first define an energy function
 `E(P[i], P[j])` that returns a similarity like measure of the two
 probabilities.  Both the symmetric Expected Likelihood Inner Product
 and asymmetric KL-divergence are implemented.

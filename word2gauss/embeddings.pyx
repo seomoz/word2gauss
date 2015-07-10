@@ -30,7 +30,7 @@
 #       max(0, C - E(P[i_pos], P[j_pos]) + E(P[i_neg, P[i_neg]))
 #   dLoss/dparameters = dLoss / dE * dE/dparameters
 #   dLoss/dparameters = 0 if loss == 0
-#   dLoss/dparamters = -1 * dE(P[i_pos], P[j_pos]) / dparamters + 
+#   dLoss/dparamters = -1 * dE(P[i_pos], P[j_pos]) / dparamters +
 #       dE(P[i_neg], P[j_neg])
 #
 
@@ -116,7 +116,7 @@ cdef class GaussianEmbedding:
 
     # the numpy arrays holding data as described above
     # NOTE: the Cython code assumes the data is stored in C contiguous order
-    # and asserted on creation 
+    # and asserted on creation
     cdef np.ndarray mu, sigma, acc_grad_mu, acc_grad_sigma
 
     # the covariance type as defined above
@@ -189,7 +189,7 @@ cdef class GaussianEmbedding:
             self.covariance_type = SPHERICAL
         else:
             raise ValueError
-    
+
         self.energy_type = energy_type
         if energy_type == 'KL':
             self.energy_func = <energy_t>kl_energy
@@ -200,7 +200,7 @@ cdef class GaussianEmbedding:
         else:
             raise ValueError
 
-        self.N = N 
+        self.N = N
         self.K = size
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
@@ -208,7 +208,7 @@ cdef class GaussianEmbedding:
         self.eta = eta
         self.Closs = Closs
 
-        # Initialize parameters 
+        # Initialize parameters
         if mu is None:
             _mu = init_params['mu0'] * np.ascontiguousarray(
                 np.random.randn(self.N, self.K).astype(DTYPE))
@@ -248,6 +248,92 @@ cdef class GaussianEmbedding:
         assert _acc_grad_sigma.flags['C_CONTIGUOUS']
         self.acc_grad_sigma = _acc_grad_sigma
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
+
+    def update(self, N, init_params={
+            'mu0': 0.1,
+            'sigma_mean0': 0.5,
+            'sigma_std0': 1.0
+        }):
+        '''
+        This function adds to the current np arrays: mu, sigma, acc_grad_mu
+        and acc_grad_sigma to account for any new vocabulary that we need to
+         introduce to the model for retraining.
+
+        If the original size of the vocabulary is N, and the new size is M
+        It adds new rows to self.mu to make it M x K
+        It increases the size of the other M x 1 dimensional arrays.
+
+        self = embeddings model
+        N = Total size of the vocabulary
+        init_params = initialization parameters to initialize new rows
+        '''
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
+        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
+        LOGGER.info("New vocab size %i" % N)
+        LOGGER.info("Old vocab size %i" % self.mu.shape[0])
+        if N > self.N:
+
+            if self.covariance_type == SPHERICAL:
+                LOGGER.info("covariance is spherical")
+            else:
+                raise ValueError
+
+            # there are new words in the vocabulary
+            # add more rows
+            n_words = N - self.N
+            LOGGER.info("%i new words" % n_words)
+
+            # update mu with n_words more rows initialized randomly
+            _mu = np.vstack([self.mu, init_params['mu0'] * np.ascontiguousarray(
+                np.random.randn(n_words, self.mu.shape[1]).astype(DTYPE))])
+            self.mu = _mu
+            LOGGER.info("mu updated with %i new rows" % n_words)
+
+            # update sigma
+            s = np.random.randn(n_words, 1).astype(DTYPE)
+            s *= init_params['sigma_std0']
+            s += init_params['sigma_mean0']
+            LOGGER.info("s created with %i new rows" % n_words)
+
+            _sigma = np.vstack([self.sigma, np.ascontiguousarray(
+                np.maximum(self.sigma_min, np.minimum(s, self.sigma_max)))])
+            LOGGER.info("sigma updated with %i new rows" % n_words)
+            self.sigma = _sigma
+
+            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
+            assert _sigma.flags['C_CONTIGUOUS'] and _sigma.flags['OWNDATA']
+
+            # updating pointers
+            self.mu_ptr = &_mu[0, 0]
+            self.sigma_ptr = &_sigma[0, 0]
+            LOGGER.info("sigma and mu pointers updated ")
+
+            # update acc_grad_mu
+            _acc_grad_mu = np.append(self.acc_grad_mu,
+                np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
+            LOGGER.info("acc_grad_mu updated with %i new rows" % n_words)
+
+            assert _acc_grad_mu.flags['C_CONTIGUOUS'] and \
+                _acc_grad_mu.flags['OWNDATA']
+            self.acc_grad_mu = _acc_grad_mu
+            self.acc_grad_mu_ptr = &_acc_grad_mu[0]
+            LOGGER.info("acc_grad_mu pointer updated ")
+
+            # update acc_grad_sigma
+            _acc_grad_sigma = np.append(self.acc_grad_sigma, np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
+            LOGGER.info("acc_grad_sigma updated with %i new rows" % n_words)
+
+            assert _acc_grad_sigma.flags['C_CONTIGUOUS'] and \
+                _acc_grad_sigma.flags['OWNDATA']
+            self.acc_grad_sigma = _acc_grad_sigma
+            self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
+            LOGGER.info("acc_grad_sigma pointer updated ")
+
+            self.N = N
+            LOGGER.info("N Updated")
+
 
     def save(self, fname, vocab=None, full=True):
         '''
@@ -373,7 +459,7 @@ cdef class GaussianEmbedding:
 
             with closing(fin.extractfile('sigma')) as f:
                 _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, -1).copy()
-            with closing(fin.extractfile('acc_grad_mu')) as f:    
+            with closing(fin.extractfile('acc_grad_mu')) as f:
                 _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
             with closing(fin.extractfile('acc_grad_sigma')) as f:
                 _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
@@ -395,7 +481,7 @@ cdef class GaussianEmbedding:
 
         self.acc_grad_sigma = _acc_grad_sigma
         assert (
-            self.acc_grad_sigma.flags['C_CONTIGUOUS'] and 
+            self.acc_grad_sigma.flags['C_CONTIGUOUS'] and
             self.acc_grad_sigma.flags['OWNDATA']
         )
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
@@ -469,6 +555,8 @@ cdef class GaussianEmbedding:
             return self.acc_grad_mu
         elif name == 'acc_grad_sigma':
             return self.acc_grad_sigma
+        elif name == 'N':
+            return self.N
         else:
             raise AttributeError
 
@@ -661,7 +749,7 @@ cdef void kl_gradient(size_t i, size_t j,
         # compute deltaprime and assign it to dEdmu
         # Note:
         # Delta'[i, j] * Delta'[i, j].T is a dense K x K matrix, but we
-        # only have one parameter that is tied along the diagnonal.
+        # only have one parameter that is tied along the diagonal.
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
@@ -790,7 +878,7 @@ cdef void train_batch(
 
         pos_energy = energy_func(posi, posj,
             mu_ptr, sigma_ptr, covariance_type, N, K)
-        neg_energy = energy_func(negi, negj, 
+        neg_energy = energy_func(negi, negj,
             mu_ptr, sigma_ptr, covariance_type, N, K)
         loss = Closs - pos_energy + neg_energy
 
@@ -863,7 +951,7 @@ cdef void _accumulate_update(
         l2_mu = C / l2_mu
         for i in range(K):
             mu_ptr[k * K + i] *= l2_mu
-    
+
     # now for Sigma
     if covariance_type == SPHERICAL:
         acc_grad_sigma[k] += dsigma[0] ** 2
