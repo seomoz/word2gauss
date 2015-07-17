@@ -502,6 +502,9 @@ cdef class GaussianEmbedding:
                 word_id
             * if target = [(tuple of strings), (tuple of strings)] then
                 it is interpreted as positive and negative words
+            ** NOTE: if using tuples and only have one entry in the list,
+                then need to use the trailing comma syntax, e.g.
+                [('king', 'woman'), ('man', )] not [('king', 'woman'), ('man')]
 
         Metric is callable with this interface:
             array(N) with similarities = metric(
