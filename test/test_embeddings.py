@@ -7,35 +7,52 @@ from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
 
 DTYPE = np.float32
 
-def sample_embed(energy_type='KL'):
+def sample_embed(energy_type='KL', covariance_type='spherical'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
         [-0.1, -0.4]
     ], dtype=DTYPE)
-    sigma = np.array([
-        [1.0],
-        [5.0],
-        [0.8]
-    ], dtype=DTYPE)
+    if covariance_type == 'spherical':
+        sigma = np.array([
+            [1.0],
+            [5.0],
+            [0.8]
+        ], dtype=DTYPE)
+    elif covariance_type == 'diagonal':
+        sigma = np.array([
+            [1.0, 0.1],
+            [5.0, 5.5],
+            [0.8, 1.1]
+        ], dtype=DTYPE)
 
     return GaussianEmbedding(3, size=2,
-        covariance_type='spherical',
+        covariance_type=covariance_type,
         energy_type=energy_type,
         mu=mu, sigma=sigma
     )
 
 class TestKLEnergy(unittest.TestCase):
-    def setUp(self):
-        self.embed = sample_embed()
-
     def test_kl_energy_spherical(self):
+        embed = sample_embed(energy_type='KL', covariance_type='spherical')
+
         # divergence between same distribution is 0
-        self.assertAlmostEqual(self.embed.energy(1, 1), 0.0)
+        self.assertAlmostEqual(embed.energy(1, 1), 0.0)
 
         # energy = -KL divergence
         # 0 is closer to 2 then to 1
-        self.assertTrue(-self.embed.energy(0, 2) < -self.embed.energy(0, 1))
+        self.assertTrue(-embed.energy(0, 2) < -embed.energy(0, 1))
+
+    def test_kl_energy_diagonal(self):
+        embed = sample_embed(energy_type='KL', covariance_type='diagonal')
+
+        # divergence between same distribution is 0
+        self.assertAlmostEqual(embed.energy(1, 1), 0.0)
+
+        # energy = -KL divergence
+        # 0 is closer to 2 then to 1
+        self.assertTrue(-embed.energy(0, 2) < -embed.energy(0, 1))
+
 
 class TestIPEnergy(unittest.TestCase):
     def setUp(self):
@@ -101,7 +118,15 @@ class TestGaussianEmbedding(unittest.TestCase):
         last_two_ids = sorted([result['id'] for result in neighbors2[-2:]])
         self.assertEqual(sorted(last_two_ids), [0, 1])
 
-    def test_train_batch_KL(self):
+    def test_model_update(self):
+        for covariance_type, sigma_shape1 in [
+                ('spherical', 1), ('diagonal', 2)]:
+            embed = sample_embed(covariance_type=covariance_type)
+            embed.update(5)
+            self.assertEquals(embed.mu.shape, (5, 2))
+            self.assertEquals(embed.sigma.shape, (5, sigma_shape1))
+
+    def test_train_batch_KL_spherical(self):
         training_data = self._training_data()
 
         embed = GaussianEmbedding(10, 5,
@@ -115,11 +140,21 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         self._check_results(embed)
 
-    def test_model_update(self):
-        self.embed = sample_embed()
-        self.embed.update(5)
-        self.assertEquals(self.embed.mu.shape, (5, 2))
-        self.assertEquals(self.embed.sigma.shape, (5, 1))
+    def test_train_batch_KL_diagonal(self):
+        training_data = self._training_data()
+
+        embed = GaussianEmbedding(10, 5,
+            covariance_type='diagonal',
+            energy_type='KL',
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
+        )
+
+        # diagonal training has more parameters so needs more then one
+        # epoch to fully learn data
+        for k in xrange(0, len(training_data), 100):
+            embed.train_batch(training_data[k:(k+100)])
+
+        self._check_results(embed)
 
     def test_train_batch_inner_product(self):
         training_data = self._training_data()
