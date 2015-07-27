@@ -569,8 +569,10 @@ cdef class GaussianEmbedding:
             return self.acc_grad_mu
         elif name == 'acc_grad_sigma':
             return self.acc_grad_sigma
-        elif name == 'N':
-            return self.N
+        elif name == 'covariance_type':
+            return self.covariance_type
+        elif name == 'energy_type':
+            return self.energy_type
         else:
             raise AttributeError
 
