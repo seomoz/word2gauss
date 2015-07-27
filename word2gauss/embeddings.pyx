@@ -848,6 +848,7 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
     cdef DTYPE_t log_2_pi = 1.8378770664093453
     cdef DTYPE_t det_fac
     cdef DTYPE_t mu_diff_sq
+    cdef DTYPE_t sigmai_plus_sigmaj
     cdef size_t k
 
     if covariance_type == SPHERICAL:
@@ -866,6 +867,23 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
             K * log_2_pi
         )
 
+    elif covariance_type == DIAGONAL:
+        # log(det(sigma[i] + sigma[j]))
+        # = log PROD (sigma[i] + sigma[j])
+        # = SUM log (sigma[i] + sigma[j])
+
+        det_fac = 0.0
+        mu_diff_sq = 0.0
+
+        for k in range(K):
+            sigmai_plus_sigmaj = sigma_ptr[i * K + k] + sigma_ptr[j * K + k]
+            det_fac += log(sigmai_plus_sigmaj)
+            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2 / (
+                sigmai_plus_sigmaj)
+
+        return -0.5 * (det_fac + mu_diff_sq + K * log_2_pi)
+
+
 cdef void ip_gradient(size_t i, size_t j,
     DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
     DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
@@ -878,7 +896,7 @@ cdef void ip_gradient(size_t i, size_t j,
     #   dE/dSigma[i] = dE/dSigma[j] = 0.5 * (
     #   Delta[i, j] * Delta[i, j].T - (Sigma[i] + Sigma[j]) ** -1)
     #   Delta[i, j] = ((Sigma[i] + Sigma[j]) ** -1) * (mu[i] - mu[j])
-    cdef DTYPE_t delta, sigmai_plus_sigmaj_inv, sum_delta2
+    cdef DTYPE_t delta, sigmai_plus_sigmaj, sigmai_plus_sigmaj_inv, sum_delta2
     cdef size_t k
 
     if covariance_type == SPHERICAL:
@@ -898,6 +916,19 @@ cdef void ip_gradient(size_t i, size_t j,
             - sigmai_plus_sigmaj_inv
         )
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
+
+    elif covariance_type == DIAGONAL:
+        for k in xrange(K):
+            sigmai_plus_sigmaj = sigma_ptr[i * K + k] + sigma_ptr[j * K + k]
+            sigmai_plus_sigmaj_inv = 1.0 / sigmai_plus_sigmaj
+            delta = sigmai_plus_sigmaj_inv * (
+                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+
+            dEdmui_ptr[k] = -delta
+            dEdmuj_ptr[k] = delta
+
+            dEdsigmai_ptr[k] = 0.5 * (delta ** 2 - sigmai_plus_sigmaj_inv)
+            dEdsigmaj_ptr[k] = dEdsigmai_ptr[k]
 
 
 cdef void train_batch(
