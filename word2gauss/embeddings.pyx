@@ -1067,7 +1067,7 @@ cdef void _accumulate_update(
     elif covariance_type == DIAGONAL:
         sum_dsigma = 0.0
         for i in xrange(K):
-            sum_dsigma += dsigma[0] ** 2
+            sum_dsigma += dsigma[i] ** 2
         sum_dsigma /= K
         acc_grad_sigma[k] += sum_dsigma
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
