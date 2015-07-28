@@ -1025,9 +1025,10 @@ cdef void _accumulate_update(
 
     # accumulate the gradients and update
     cdef size_t i
-    cdef DTYPE_t sum_dmu2
+    cdef DTYPE_t sum_dmu2, sum_dsigma
     cdef DTYPE_t local_eta
     cdef DTYPE_t l2_mu
+    cdef DTYPE_t sig
 
     # update for mu
     # first update the accumulated gradient for adagrad
@@ -1062,6 +1063,21 @@ cdef void _accumulate_update(
             sigma_ptr[k] = M
         elif sigma_ptr[k] < m:
             sigma_ptr[k] = m
+
+    elif covariance_type == DIAGONAL:
+        sum_dsigma = 0.0
+        for i in xrange(K):
+            sum_dsigma += dsigma[0] ** 2
+        sum_dsigma /= K
+        acc_grad_sigma[k] += sum_dsigma
+        local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
+        for i in xrange(K):
+            sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
+            if sigma_ptr[k * K + i] > M:
+                sigma_ptr[k * K + i] = M
+            elif sigma_ptr[k * K + i] < m:
+                sigma_ptr[k * K + i] = m
+
 
 cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
     text, random_gen, uint32_t half_window_size=2,
