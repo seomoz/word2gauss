@@ -549,14 +549,18 @@ cdef class GaussianEmbedding:
         scores = metric(self.mu, t.reshape(1, -1))
         top_indices = scores.argsort()[::-1][:num]
         ret = [
-            {'id': ind, 'similarity': scores[ind], 'sigma': self.sigma[ind, :]}
+            {
+                'id': ind,
+                'similarity': scores[ind],
+                'sigma': self.sigma[ind, :].prod()
+            }
             for ind in top_indices
         ]
         if vocab is not None:
             for k, ind in enumerate(top_indices):
                 ret[k]['word'] = vocab.id2word(ind)
         if sort_order == 'sigma':
-            ret.sort(key=lambda x: x['sigma'].prod())
+            ret.sort(key=lambda x: x['sigma'])
 
         return ret
 
