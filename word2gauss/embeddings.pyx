@@ -715,7 +715,7 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
     '''
     Implementation of KL-divergence energy function
     '''
-    #   E(P[i], P[j]) = 0.5 * (
+    #   E(P[i], P[j]) = -0.5 * (
     #       Tr((Sigma[i] ** -1) * Sigma[j]) +
     #       (mu[i] - mu[j]).T * (Sigma[i] ** -1) * (mu[i] - mu[j]) -
     #       d - log(det(Sigma[j]) / det(Sigma[i]))
