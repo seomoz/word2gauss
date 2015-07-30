@@ -523,6 +523,37 @@ cdef class GaussianEmbedding:
         )
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
+
+    def get_phrases_vector(self, phrases, vocab=None):
+        if vocab is None:
+            raise Exception("Cannot convert phrase to a vector without a vocabulary")
+        vec = np.zeros(self.K)
+        for ph in phrases:
+            ph_tok = vocab.tokenize(ph)
+            phrase_vec = np.zeros(self.K)
+            for p in ph_tok:
+                if isinstance(p, basestring):
+                    phrase_vec += self.mu[vocab.word2id(p), :]
+            phrase_vec /= len(ph_tok)
+            vec += phrase_vec
+        vec /= len(phrases)
+        return vec
+
+    def phrases_to_vector(self, target, vocab=None):
+        ''' Input is a list of lists, where target[0] is the list of positive
+        phrases and target[1] is the optional list of negative phrases
+        '''
+        if vocab is None:
+            raise Exception("Cannot convert phrase to a vector without a vocabulary")
+        if len(target) == 1:
+            return self.get_phrases_vector(target[0], vocab=vocab)
+        elif len(target) == 2:
+            positive_vec = self.get_phrases_vector(target[0], vocab=vocab)
+            negative_vec = self.get_phrases_vector(target[1], vocab=vocab)
+            return (positive_vec-negative_vec)
+        else:
+            raise Exception("List should contain either 1 or 2 lists")
+
     def nearest_neighbors(self, target, metric=cosine, num=10, vocab=None,
             sort_order='similarity'):
         '''Find nearest neighbors.
@@ -565,10 +596,18 @@ cdef class GaussianEmbedding:
             for pos_neg, fac in zip(target, [1.0, -1.0]):
                 for word_or_id in pos_neg:
                     if isinstance(word_or_id, basestring):
+                        # input is word, get its ID
                         word_id = vocab.word2id(word_or_id)
-                    else:
+                        mu_val = self.mu[word_id, :]
+                    elif isinstance(word_or_id, int):
+                        # input is ID
                         word_id = word_or_id
-                    t += fac * self.mu[word_id, :]
+                        mu_val = self.mu[word_id, :]
+                    else:
+                        # input is a vector
+                        mu_val = word_or_id
+
+                    t += fac * mu_val
         else:
             t = self.mu[target, :]
 

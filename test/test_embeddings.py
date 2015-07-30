@@ -1,13 +1,18 @@
 
 import unittest
-
 import numpy as np
-
+import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
+from topical import utils
 
 DTYPE = np.float32
 
-def sample_embed(energy_type='KL', covariance_type='spherical'):
+def sample_vocab():
+    ngrams = [{'new':0, 'york':1, 'city':2}]
+    vocab = utils.Vocabulary(ngrams)
+    return vocab
+
+def sample_embed(energy_type='KL'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
@@ -172,7 +177,6 @@ class TestGaussianEmbedding(unittest.TestCase):
 
     def test_train_batch_KL_diagonal(self):
         training_data = self._training_data()
-
         embed = GaussianEmbedding(10, 5,
             covariance_type='diagonal',
             energy_type='KL',
@@ -186,7 +190,17 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         self._check_results(embed)
 
+
+    def test_phrases_to_vector(self):
+        self.embed = sample_embed()
+        vocab = sample_vocab()
+        target = [["new"], ["york"]]
+        res = np.array([-1. , 1.25])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
+
     def test_train_batch_IP_spherical(self):
+        handle multiple comma separated phrases
         training_data = self._training_data()
 
         embed = GaussianEmbedding(10, 5,
