@@ -1034,7 +1034,7 @@ cdef void _accumulate_update(
     # first update the accumulated gradient for adagrad
     sum_dmu2 = 0.0
     for i in range(K):
-        sum_dmu2 += dmu[i] ** 2
+        sum_dmu2 += dmu[i] * dmu[i]
     sum_dmu2 /= K
     acc_grad_mu[k] += sum_dmu2
 
@@ -1045,7 +1045,7 @@ cdef void _accumulate_update(
     l2_mu = 0.0
     for i in range(K):
         mu_ptr[k * K + i] -= fac * local_eta * dmu[i]
-        l2_mu += mu_ptr[k * K + i] ** 2
+        l2_mu += mu_ptr[k * K + i] * mu_ptr[k * K + i]
     l2_mu = sqrt(l2_mu)
 
     # regularizer
@@ -1056,7 +1056,7 @@ cdef void _accumulate_update(
 
     # now for Sigma
     if covariance_type == SPHERICAL:
-        acc_grad_sigma[k] += dsigma[0] ** 2
+        acc_grad_sigma[k] += dsigma[0] * dsigma[0]
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         sigma_ptr[k] -= fac * local_eta * dsigma[0]
         if sigma_ptr[k] > M:
@@ -1067,16 +1067,19 @@ cdef void _accumulate_update(
     elif covariance_type == DIAGONAL:
         sum_dsigma = 0.0
         for i in xrange(K):
-            sum_dsigma += dsigma[i] ** 2
+            sum_dsigma += dsigma[i] * dsigma[i]
         sum_dsigma /= K
         acc_grad_sigma[k] += sum_dsigma
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         for i in xrange(K):
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
-            if sigma_ptr[k * K + i] > M:
-                sigma_ptr[k * K + i] = M
-            elif sigma_ptr[k * K + i] < m:
-                sigma_ptr[k * K + i] = m
+            # bound sigma between m and M
+            # note: the ternary operator instead of if statment
+            #   allows cython to generate code that gcc will vectorize
+            sigma_ptr[k * K + i] = (M if sigma_ptr[k * K + i] > M
+                else sigma_ptr[k * K + i])
+            sigma_ptr[k * K + i] = (m if sigma_ptr[k * K + i] < m
+                else sigma_ptr[k * K + i])
 
 
 cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
