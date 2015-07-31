@@ -790,8 +790,13 @@ cdef void kl_gradient(size_t i, size_t j,
     #  Delta'[i, j] = (Sigma[i] ** -1) * (mu[i] - mu[j])
     cdef DTYPE_t deltaprime
     cdef DTYPE_t sum_deltaprime2
-    cdef DTYPE_t si, sj
+    cdef DTYPE_t si, sj, one_over_si, sj_si2
     cdef size_t k
+
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # compute deltaprime and assign it to dEdmu
@@ -801,12 +806,12 @@ cdef void kl_gradient(size_t i, size_t j,
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
+        one_over_si = 1.0 / sigma_ptr[i]
         for k in xrange(K):
-            deltaprime = (1.0 / sigma_ptr[i]) * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            deltaprime = one_over_si * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
             dEdmuj_ptr[k] = deltaprime
-            sum_deltaprime2 += deltaprime ** 2
+            sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
             sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
@@ -821,14 +826,26 @@ cdef void kl_gradient(size_t i, size_t j,
             sj = sigma_ptr[j * K + k]
 
             # compute deltaprime and assign it to dEdmu
-            deltaprime = (1.0 / si) * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            deltaprime = (1.0 / si) * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
             dEdmuj_ptr[k] = deltaprime
 
+        # splitting the loop here and writting sj / si ** 2 as below
+        # allows vectorization
+        for k in xrange(K):
+            si = sigma_ptr[i * K + k]
+            sj = sigma_ptr[j * K + k]
+            deltaprime = dEdmuj_ptr[k]
+
+            # writing sj / si ** 2 like this allows vectorization
+            # since gcc was trying to substitute sj / si / si with
+            # sj * pow(si, -2)
+            sj_si2 = sj / si
+            sj_si2 /= si
+
             # just use the diagonal elements of Delta'[i, j] * Delta'[i, j].T
             dEdsigmai_ptr[k] = 0.5 * (
-                sj / si / si
+                sj_si2
                 + deltaprime * deltaprime
                 - 1.0 / si
             )
