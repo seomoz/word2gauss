@@ -13,12 +13,27 @@ with asynchronous stochastic gradient descent (Adagrad).
 First install numpy, scipy and the packages in `requirements.txt`.
 Then `sudo make install`.  `make test` runs the test suite.
 
-NOTE: if you are using gcc then we strongly recommend using these compile flags
-to force higher levels of optimization:
+NOTE: The performance sensitive parts of the code have been carefully
+written in a way that allows gcc to auto-vectorize all the important loops.
+Accordingly we recommend using gcc to compile and setting these
+these flags for building:
 ```
 export CFLAGS="-ftree-vectorizer-verbose=2 -O3 -ffast-math"
 sudo -E bash -c "make install"
 ```
+
+If you are using a Mac, gcc produces code approximately 2.5X faster then
+the default clang compiler.  You can force the build to use gcc instead
+of clang with:
+```
+# change these to the location of gcc -- note that /usr/bin/gcc is really
+# clang in a default XCode installation
+export CC=/usr/local/bin/gcc
+export CXX=/usr/local/bin/g++
+export CFLAGS="-ftree-vectorizer-verbose=2 -O3 -ffast-math"
+sudo -E bash -c "make install"
+```
+
 
 ### Code overview
 The `GaussianEmbedding` class is the main workhorse for most tasks.  It
