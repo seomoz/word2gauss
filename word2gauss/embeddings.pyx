@@ -723,9 +723,17 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
     cdef DTYPE_t det_fac
     cdef DTYPE_t trace_fac
-    cdef DTYPE_t mu_diff_sq
+    cdef DTYPE_t mu_diff_sq, mu_diff
     cdef DTYPE_t sigma_ratio
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+
     cdef size_t k
+
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[j] / sigma[i]) = log det sigmaj - log det sigmai
@@ -737,7 +745,8 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
         mu_diff_sq = 0.0
         for k in range(K):
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff
 
         return -0.5 * (
             trace_fac
@@ -754,18 +763,22 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         # = SUM (log Sigmaj[k]) - SUM (log Sigmai[k)
         # = SUM (log Sigmaj[k] - log Sigmai[k])
         # = SUM (log (Sigmaj[k] / Sigmai[k]))
+        # = log (prod Sigmaj[k] / Sigmai[k])
+
+        sigmai_ptr = sigma_ptr + i * K
+        sigmaj_ptr = sigma_ptr + j * K
 
         trace_fac = 0.0
         mu_diff_sq = 0.0
-        det_fac = 0.0
+        det_fac = 1.0
         for k in range(K):
-            sigma_ratio = sigma_ptr[j * K + k] / sigma_ptr[i * K + k]
+            sigma_ratio = sigmaj_ptr[k] / sigmai_ptr[k]
             trace_fac += sigma_ratio
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2 / (
-                sigma_ptr[i * K + k])
-            det_fac += log(sigma_ratio)
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff / sigmai_ptr[k]
+            det_fac *= sigma_ratio
 
-        return -0.5 * (trace_fac + mu_diff_sq - K - det_fac)
+        return -0.5 * (trace_fac + mu_diff_sq - K - log(det_fac))
 
 
 cdef void kl_gradient(size_t i, size_t j,

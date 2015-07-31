@@ -11,7 +11,14 @@ with asynchronous stochastic gradient descent (Adagrad).
 
 ### Installing
 First install numpy, scipy and the packages in `requirements.txt`.
-Then `make install`.  `make test` runs the test suite.
+Then `sudo make install`.  `make test` runs the test suite.
+
+NOTE: if you are using gcc then we strongly recommend using these compile flags
+to force higher levels of optimization:
+```
+export CFLAGS="-ftree-vectorizer-verbose=2 -O3 -ffast-math"
+sudo -E bash -c "make install"
+```
 
 ### Code overview
 The `GaussianEmbedding` class is the main workhorse for most tasks.  It
