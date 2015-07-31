@@ -103,8 +103,6 @@ approximations to simplify `Sigma[i]`:
 * 'diagonal' in which case `Sigma[i]` is a vector length `K`
 * 'spherical' in which case `Sigma[i]` is a single float
 
-**Note:** only the 'spherical' case is currently implemented.
-
 To learn the probabilities, first define an energy function
 `E(P[i], P[j])` that returns a similarity like measure of the two
 probabilities.  Both the symmetric Expected Likelihood Inner Product
