@@ -1122,11 +1122,20 @@ cdef void train_batch(
                 dmui, dsigmai, dmuj, dsigmaj,
                 mu_ptr, sigma_ptr, covariance_type, N, K)
 
-            _accumulate_update(i, dmui, dsigmai,
+            # accumulate the gradients for adagrad and update
+            # parameters. center_index determines whether we update
+            # the context parameters or center word parameters.
+            # can handle both cases by appropriately modifying
+            # the i, j passed to _accumulate_update.
+            # if center_index == 0 then pass i and j + N
+            # if center_index == 1 then pass i + N and j
+            # so i + center_index * N and
+            #    j + (1 - center_index) * N handles both cases
+            _accumulate_update(i + center_index * N, dmui, dsigmai,
                 mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
-            _accumulate_update(j, dmuj, dsigmaj,
+            _accumulate_update(j + (1 - center_index) * N, dmuj, dsigmaj,
                 mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)

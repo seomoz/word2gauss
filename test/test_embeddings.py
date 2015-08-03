@@ -162,7 +162,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
-            mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.0, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -192,7 +192,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='IP',
-            mu_max=1.0, sigma_min=0.8, sigma_max=1.2, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -206,7 +206,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='diagonal',
             energy_type='IP',
-            mu_max=1.0, sigma_min=0.8, sigma_max=1.2, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -220,7 +220,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
-            mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         def iter_pairs():
