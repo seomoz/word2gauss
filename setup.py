@@ -10,7 +10,6 @@ ext_modules = [
         "word2gauss.embeddings",
         sources=['word2gauss/embeddings.pyx'],
         include_dirs=[np.get_include()],
-        extra_compile_args=['-std=c++0x'],
         language="c++"
     )
 ]

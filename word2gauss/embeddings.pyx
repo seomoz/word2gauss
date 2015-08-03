@@ -723,9 +723,17 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
     cdef DTYPE_t det_fac
     cdef DTYPE_t trace_fac
-    cdef DTYPE_t mu_diff_sq
+    cdef DTYPE_t mu_diff_sq, mu_diff
     cdef DTYPE_t sigma_ratio
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+
     cdef size_t k
+
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[j] / sigma[i]) = log det sigmaj - log det sigmai
@@ -737,7 +745,8 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
         mu_diff_sq = 0.0
         for k in range(K):
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff
 
         return -0.5 * (
             trace_fac
@@ -754,18 +763,22 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         # = SUM (log Sigmaj[k]) - SUM (log Sigmai[k)
         # = SUM (log Sigmaj[k] - log Sigmai[k])
         # = SUM (log (Sigmaj[k] / Sigmai[k]))
+        # = log (prod Sigmaj[k] / Sigmai[k])
+
+        sigmai_ptr = sigma_ptr + i * K
+        sigmaj_ptr = sigma_ptr + j * K
 
         trace_fac = 0.0
         mu_diff_sq = 0.0
-        det_fac = 0.0
+        det_fac = 1.0
         for k in range(K):
-            sigma_ratio = sigma_ptr[j * K + k] / sigma_ptr[i * K + k]
+            sigma_ratio = sigmaj_ptr[k] / sigmai_ptr[k]
             trace_fac += sigma_ratio
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2 / (
-                sigma_ptr[i * K + k])
-            det_fac += log(sigma_ratio)
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff / sigmai_ptr[k]
+            det_fac *= sigma_ratio
 
-        return -0.5 * (trace_fac + mu_diff_sq - K - det_fac)
+        return -0.5 * (trace_fac + mu_diff_sq - K - log(det_fac))
 
 
 cdef void kl_gradient(size_t i, size_t j,
@@ -790,8 +803,13 @@ cdef void kl_gradient(size_t i, size_t j,
     #  Delta'[i, j] = (Sigma[i] ** -1) * (mu[i] - mu[j])
     cdef DTYPE_t deltaprime
     cdef DTYPE_t sum_deltaprime2
-    cdef DTYPE_t si, sj
+    cdef DTYPE_t si, sj, one_over_si, sj_si2
     cdef size_t k
+
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # compute deltaprime and assign it to dEdmu
@@ -801,12 +819,12 @@ cdef void kl_gradient(size_t i, size_t j,
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
+        one_over_si = 1.0 / sigma_ptr[i]
         for k in xrange(K):
-            deltaprime = (1.0 / sigma_ptr[i]) * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            deltaprime = one_over_si * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
             dEdmuj_ptr[k] = deltaprime
-            sum_deltaprime2 += deltaprime ** 2
+            sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
             sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
@@ -821,14 +839,26 @@ cdef void kl_gradient(size_t i, size_t j,
             sj = sigma_ptr[j * K + k]
 
             # compute deltaprime and assign it to dEdmu
-            deltaprime = (1.0 / si) * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            deltaprime = (1.0 / si) * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
             dEdmuj_ptr[k] = deltaprime
 
+        # splitting the loop here and writting sj / si ** 2 as below
+        # allows vectorization
+        for k in xrange(K):
+            si = sigma_ptr[i * K + k]
+            sj = sigma_ptr[j * K + k]
+            deltaprime = dEdmuj_ptr[k]
+
+            # writing sj / si ** 2 like this allows vectorization
+            # since gcc was trying to substitute sj / si / si with
+            # sj * pow(si, -2)
+            sj_si2 = sj / si
+            sj_si2 /= si
+
             # just use the diagonal elements of Delta'[i, j] * Delta'[i, j].T
             dEdsigmai_ptr[k] = 0.5 * (
-                sj / si / si
+                sj_si2
                 + deltaprime * deltaprime
                 - 1.0 / si
             )
@@ -851,9 +881,16 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
 
     cdef DTYPE_t log_2_pi = 1.8378770664093453
     cdef DTYPE_t det_fac
-    cdef DTYPE_t mu_diff_sq
+    cdef DTYPE_t mu_diff_sq, mu_diff
     cdef DTYPE_t sigmai_plus_sigmaj
     cdef size_t k
+
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[i] + sigma[j]))
@@ -863,7 +900,8 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
 
         mu_diff_sq = 0.0
         for k in range(K):
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff
 
         return -0.5 * (
             det_fac +
@@ -875,17 +913,21 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
         # log(det(sigma[i] + sigma[j]))
         # = log PROD (sigma[i] + sigma[j])
         # = SUM log (sigma[i] + sigma[j])
+        # = log prod (sigma[i] + sigma[j])
 
-        det_fac = 0.0
+        sigmai_ptr = sigma_ptr + i * K
+        sigmaj_ptr = sigma_ptr + j * K
+
+        det_fac = 1.0
         mu_diff_sq = 0.0
 
         for k in range(K):
-            sigmai_plus_sigmaj = sigma_ptr[i * K + k] + sigma_ptr[j * K + k]
-            det_fac += log(sigmai_plus_sigmaj)
-            mu_diff_sq += (mu_ptr[i * K + k] - mu_ptr[j * K + k]) ** 2 / (
-                sigmai_plus_sigmaj)
+            sigmai_plus_sigmaj = sigmai_ptr[k] + sigmaj_ptr[k]
+            det_fac *= sigmai_plus_sigmaj
+            mu_diff = mui_ptr[k] - muj_ptr[k]
+            mu_diff_sq += mu_diff * mu_diff / sigmai_plus_sigmaj
 
-        return -0.5 * (det_fac + mu_diff_sq + K * log_2_pi)
+        return -0.5 * (log(det_fac) + mu_diff_sq + K * log_2_pi)
 
 
 cdef void ip_gradient(size_t i, size_t j,
@@ -901,7 +943,15 @@ cdef void ip_gradient(size_t i, size_t j,
     #   Delta[i, j] * Delta[i, j].T - (Sigma[i] + Sigma[j]) ** -1)
     #   Delta[i, j] = ((Sigma[i] + Sigma[j]) ** -1) * (mu[i] - mu[j])
     cdef DTYPE_t delta, sigmai_plus_sigmaj, sigmai_plus_sigmaj_inv, sum_delta2
+    cdef DTYPE_t dEdsigma
     cdef size_t k
+
+    cdef DTYPE_t* mui_ptr
+    cdef DTYPE_t* muj_ptr
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+    mui_ptr = mu_ptr + i * K
+    muj_ptr = mu_ptr + j * K
 
     if covariance_type == SPHERICAL:
         # compute delta and assign it to dEdmu
@@ -909,11 +959,10 @@ cdef void ip_gradient(size_t i, size_t j,
         # we'll sum up delta ** 2 too
         sum_delta2 = 0.0
         for k in xrange(K):
-            delta = sigmai_plus_sigmaj_inv * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            delta = sigmai_plus_sigmaj_inv * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -delta
             dEdmuj_ptr[k] = delta
-            sum_delta2 += delta ** 2
+            sum_delta2 += delta * delta
 
         dEdsigmai_ptr[0] = 0.5 * (
             + sum_delta2 / K
@@ -922,17 +971,27 @@ cdef void ip_gradient(size_t i, size_t j,
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 
     elif covariance_type == DIAGONAL:
+
+        sigmai_ptr = sigma_ptr + i * K
+        sigmaj_ptr = sigma_ptr + j * K
+
         for k in xrange(K):
-            sigmai_plus_sigmaj = sigma_ptr[i * K + k] + sigma_ptr[j * K + k]
+            sigmai_plus_sigmaj = sigmai_ptr[k] + sigmaj_ptr[k]
             sigmai_plus_sigmaj_inv = 1.0 / sigmai_plus_sigmaj
-            delta = sigmai_plus_sigmaj_inv * (
-                mu_ptr[i * K + k] - mu_ptr[j * K + k])
+            delta = sigmai_plus_sigmaj_inv * (mui_ptr[k] - muj_ptr[k])
 
             dEdmui_ptr[k] = -delta
             dEdmuj_ptr[k] = delta
 
-            dEdsigmai_ptr[k] = 0.5 * (delta ** 2 - sigmai_plus_sigmaj_inv)
-            dEdsigmaj_ptr[k] = dEdsigmai_ptr[k]
+        # this break allows auto vectorization
+        for k in xrange(K):
+            sigmai_plus_sigmaj = sigmai_ptr[k] + sigmaj_ptr[k]
+            sigmai_plus_sigmaj_inv = 1.0 / sigmai_plus_sigmaj
+            delta = dEdmuj_ptr[k]
+
+            dEdsigma = 0.5 * (delta * delta - sigmai_plus_sigmaj_inv)
+            dEdsigmai_ptr[k] = dEdsigma
+            dEdsigmaj_ptr[k] = dEdsigma
 
 
 cdef void train_batch(
@@ -1034,7 +1093,7 @@ cdef void _accumulate_update(
     # first update the accumulated gradient for adagrad
     sum_dmu2 = 0.0
     for i in range(K):
-        sum_dmu2 += dmu[i] ** 2
+        sum_dmu2 += dmu[i] * dmu[i]
     sum_dmu2 /= K
     acc_grad_mu[k] += sum_dmu2
 
@@ -1045,7 +1104,7 @@ cdef void _accumulate_update(
     l2_mu = 0.0
     for i in range(K):
         mu_ptr[k * K + i] -= fac * local_eta * dmu[i]
-        l2_mu += mu_ptr[k * K + i] ** 2
+        l2_mu += mu_ptr[k * K + i] * mu_ptr[k * K + i]
     l2_mu = sqrt(l2_mu)
 
     # regularizer
@@ -1056,7 +1115,7 @@ cdef void _accumulate_update(
 
     # now for Sigma
     if covariance_type == SPHERICAL:
-        acc_grad_sigma[k] += dsigma[0] ** 2
+        acc_grad_sigma[k] += dsigma[0] * dsigma[0]
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         sigma_ptr[k] -= fac * local_eta * dsigma[0]
         if sigma_ptr[k] > M:
@@ -1067,16 +1126,19 @@ cdef void _accumulate_update(
     elif covariance_type == DIAGONAL:
         sum_dsigma = 0.0
         for i in xrange(K):
-            sum_dsigma += dsigma[i] ** 2
+            sum_dsigma += dsigma[i] * dsigma[i]
         sum_dsigma /= K
         acc_grad_sigma[k] += sum_dsigma
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         for i in xrange(K):
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
-            if sigma_ptr[k * K + i] > M:
-                sigma_ptr[k * K + i] = M
-            elif sigma_ptr[k * K + i] < m:
-                sigma_ptr[k * K + i] = m
+            # bound sigma between m and M
+            # note: the ternary operator instead of if statment
+            #   allows cython to generate code that gcc will vectorize
+            sigma_ptr[k * K + i] = (M if sigma_ptr[k * K + i] > M
+                else sigma_ptr[k * K + i])
+            sigma_ptr[k * K + i] = (m if sigma_ptr[k * K + i] < m
+                else sigma_ptr[k * K + i])
 
 
 cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
