@@ -11,19 +11,28 @@ def sample_embed(energy_type='KL', covariance_type='spherical'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
-        [-0.1, -0.4]
+        [-0.1, -0.4],
+        [1.2, -0.3],
+        [0.5, 0.5],
+        [-0.55, -0.75]
     ], dtype=DTYPE)
     if covariance_type == 'spherical':
         sigma = np.array([
             [1.0],
             [5.0],
-            [0.8]
+            [0.8],
+            [0.4],
+            [1.5],
+            [1.4]
         ], dtype=DTYPE)
     elif covariance_type == 'diagonal':
         sigma = np.array([
             [1.0, 0.1],
             [5.0, 5.5],
-            [0.8, 1.1]
+            [0.8, 1.1],
+            [0.9, 1.9],
+            [0.65, 0.9],
+            [1.5, 1.55]
         ], dtype=DTYPE)
 
     return GaussianEmbedding(3, size=2,
@@ -97,7 +106,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         # number of sample to do
         nsamples = 100000
-        training_data = np.empty((nsamples, 4), dtype=np.uint32)
+        training_data = np.empty((nsamples, 5), dtype=np.uint32)
         for k in xrange(nsamples):
             i = np.random.randint(0, 10)
 
@@ -114,8 +123,11 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             # the negative sample
             neg = (i, np.random.randint(0, 10))
+            
+            # randomly sample whether left or right is context word
+            context_index = np.random.randint(0, 2)
 
-            training_data[k, :] = pos + neg
+            training_data[k, :] = pos + neg + (context_index, )
 
         return training_data
 
@@ -136,8 +148,13 @@ class TestGaussianEmbedding(unittest.TestCase):
                 ('spherical', 1), ('diagonal', 2)]:
             embed = sample_embed(covariance_type=covariance_type)
             embed.update(5)
-            self.assertEquals(embed.mu.shape, (5, 2))
-            self.assertEquals(embed.sigma.shape, (5, sigma_shape1))
+
+            self.assertEquals(embed.mu.shape, (10, 2))
+            self.assertEquals(embed.sigma.shape, (10, sigma_shape1))
+            self.assertEquals(embed.acc_grad_mu.shape, (10, ))
+            self.assertEquals(embed.acc_grad_sigma.shape, (10, ))
+
+            self.assertEquals(embed.N, 5)
 
     def test_train_batch_KL_spherical(self):
         training_data = self._training_data()

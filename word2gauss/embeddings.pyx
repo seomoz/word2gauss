@@ -109,12 +109,11 @@ cdef class GaussianEmbedding:
     Attributes:
         N = number of words
         K = dimension of each representation
-        mu = (N, K)
-        sigma = either (N, 1) array (for spherical) or (N, K) (for diagonal)
-            NOTE: diagnonal case not implemented yet
-        acc_grad_mu = (N, ) array, the accumulated gradients for each
+        mu = (2N, K)
+        sigma = either (2N, 1) array (for spherical) or (2N, K) (for diagonal)
+        acc_grad_mu = (2N, ) array, the accumulated gradients for each
             mu update
-        acc_grad_sigma = (N, ) array, the accumulated gradients for each
+        acc_grad_sigma = (2N, ) array, the accumulated gradients for each
             sigma
 
     Since we use Cython we also store the C pointer to the underlying
@@ -222,24 +221,24 @@ cdef class GaussianEmbedding:
 
         if mu is None:
             _mu = init_params['mu0'] * np.ascontiguousarray(
-                np.random.randn(self.N, self.K).astype(DTYPE))
+                np.random.randn(2 * self.N, self.K).astype(DTYPE))
         else:
-            assert mu.shape[0] == N
+            assert mu.shape[0] == 2 * N
             assert mu.shape[1] == self.K
             _mu = mu
         self.mu = _mu
 
         if sigma is None:
             if self.covariance_type == SPHERICAL:
-                s = np.random.randn(self.N, 1).astype(DTYPE)
+                s = np.random.randn(2 * self.N, 1).astype(DTYPE)
             elif self.covariance_type == DIAGONAL:
-                s = np.random.randn(self.N, self.K).astype(DTYPE)
+                s = np.random.randn(2 * self.N, self.K).astype(DTYPE)
             s *= init_params['sigma_std0']
             s += init_params['sigma_mean0']
             _sigma = np.ascontiguousarray(
                 np.maximum(sigma_min, np.minimum(s, sigma_max)))
         else:
-            assert sigma.shape[0] == N
+            assert sigma.shape[0] == 2 * N
             if self.covariance_type == SPHERICAL:
                 assert sigma.shape[1] == 1
             elif self.covariance_type == DIAGONAL:
@@ -253,12 +252,12 @@ cdef class GaussianEmbedding:
         self.sigma_ptr = &_sigma[0, 0]
 
         # working space for accumulated gradients
-        _acc_grad_mu = np.ascontiguousarray(np.zeros(N, dtype=DTYPE))
+        _acc_grad_mu = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
         assert _acc_grad_mu.flags['C_CONTIGUOUS']
         self.acc_grad_mu = _acc_grad_mu
         self.acc_grad_mu_ptr = &_acc_grad_mu[0]
 
-        _acc_grad_sigma = np.ascontiguousarray(np.zeros(N, dtype=DTYPE))
+        _acc_grad_sigma = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
         assert _acc_grad_sigma.flags['C_CONTIGUOUS']
         self.acc_grad_sigma = _acc_grad_sigma
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
@@ -274,8 +273,8 @@ cdef class GaussianEmbedding:
          introduce to the model for retraining.
 
         If the original size of the vocabulary is N, and the new size is M
-        It adds new rows to self.mu to make it M x K
-        It increases the size of the other M x 1 dimensional arrays.
+        It adds new rows to self.mu to make it 2 * M x K
+        It increases the size of the other 2 * M x 1 dimensional arrays.
 
         N = Total size of the vocabulary
         init_params = initialization parameters to initialize new rows
@@ -286,7 +285,7 @@ cdef class GaussianEmbedding:
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
 
         LOGGER.info("New vocab size %i" % N)
-        LOGGER.info("Old vocab size %i" % self.mu.shape[0])
+        LOGGER.info("Old vocab size %i" % self.N)
         if N > self.N:
             # there are new words in the vocabulary
             # add more rows
@@ -295,60 +294,60 @@ cdef class GaussianEmbedding:
             n_words = N - self.N
             LOGGER.info("%i new words" % n_words)
 
-            # update mu with n_words more rows initialized randomly
+            # update mu with n_words
             _mu = np.ascontiguousarray(np.vstack([
-                    self.mu,
+                    self.mu[:self.N, :],
                     init_params['mu0'] * np.random.randn(
-                        n_words, self.K).astype(DTYPE)
+                        n_words, self.K).astype(DTYPE),
+                    self.mu[self.N:, :],
+                    init_params['mu0'] * np.random.randn(
+                        n_words, self.K).astype(DTYPE),
             ]))
             self.mu = _mu
-            LOGGER.info("mu updated with %i new rows" % n_words)
+            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
+            self.mu_ptr = &_mu[0, 0]
 
             # update sigma
             if self.covariance_type == SPHERICAL:
-                s = np.random.randn(n_words, 1).astype(DTYPE)
+                s = np.random.randn(2 * n_words, 1).astype(DTYPE)
             elif self.covariance_type == DIAGONAL:
-                s = np.random.randn(n_words, self.K).astype(DTYPE)
+                s = np.random.randn(2 * n_words, self.K).astype(DTYPE)
             s *= init_params['sigma_std0']
             s += init_params['sigma_mean0']
-            LOGGER.info("s created with %i new rows" % n_words)
-
+            s = np.maximum(self.sigma_min, np.minimum(s, self.sigma_max))
             _sigma = np.ascontiguousarray(np.vstack([
-                self.sigma,
-                np.maximum(self.sigma_min, np.minimum(s, self.sigma_max))
+                self.sigma[:self.N, :],
+                s[:n_words, :],
+                self.sigma[self.N:, :],
+                s[n_words:, :]
             ]))
-            LOGGER.info("sigma updated with %i new rows" % n_words)
             self.sigma = _sigma
-
-            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
             assert _sigma.flags['C_CONTIGUOUS'] and _sigma.flags['OWNDATA']
-
-            # updating pointers
-            self.mu_ptr = &_mu[0, 0]
             self.sigma_ptr = &_sigma[0, 0]
-            LOGGER.info("sigma and mu pointers updated ")
 
             # update acc_grad_mu
-            _acc_grad_mu = np.append(self.acc_grad_mu,
-                np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
-            LOGGER.info("acc_grad_mu updated with %i new rows" % n_words)
-
+            _acc_grad_mu = np.ascontiguousarray(np.hstack([
+                self.acc_grad_mu[:self.N],
+                np.zeros(n_words, dtype=DTYPE),
+                self.acc_grad_mu[self.N:],
+                np.zeros(n_words, dtype=DTYPE)
+            ]))
+            self.acc_grad_mu = _acc_grad_mu
             assert _acc_grad_mu.flags['C_CONTIGUOUS'] and \
                 _acc_grad_mu.flags['OWNDATA']
-            self.acc_grad_mu = _acc_grad_mu
             self.acc_grad_mu_ptr = &_acc_grad_mu[0]
-            LOGGER.info("acc_grad_mu pointer updated ")
 
             # update acc_grad_sigma
-            _acc_grad_sigma = np.append(self.acc_grad_sigma,
-                np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
-            LOGGER.info("acc_grad_sigma updated with %i new rows" % n_words)
-
+            _acc_grad_sigma = np.ascontiguousarray(np.hstack([
+                self.acc_grad_sigma[:self.N],
+                np.zeros(n_words, dtype=DTYPE),
+                self.acc_grad_sigma[self.N:],
+                np.zeros(n_words, dtype=DTYPE)
+            ]))
+            self.acc_grad_sigma = _acc_grad_sigma
             assert _acc_grad_sigma.flags['C_CONTIGUOUS'] and \
                 _acc_grad_sigma.flags['OWNDATA']
-            self.acc_grad_sigma = _acc_grad_sigma
             self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
-            LOGGER.info("acc_grad_sigma pointer updated ")
 
             self.N = N
 
@@ -553,7 +552,8 @@ cdef class GaussianEmbedding:
         else:
             t = self.mu[target, :]
 
-        scores = metric(self.mu, t.reshape(1, -1))
+        # get the neighbors to the focus words (top half of self.mu)
+        scores = metric(self.mu[:self.N, :], t.reshape(1, -1))
         top_indices = scores.argsort()[::-1][:num]
         ret = [
             {
@@ -584,6 +584,10 @@ cdef class GaussianEmbedding:
             return self.covariance_type
         elif name == 'energy_type':
             return self.energy_type
+        elif name == 'N':
+            return self.N
+        elif name == 'K':
+            return self.K
         else:
             raise AttributeError
 
@@ -1012,12 +1016,11 @@ cdef void train_batch(
     '''
     Update the model on a batch of data
 
-    pairs = numpy array of positive negative pair = (Npairs, 4)
-        row[0:2] is the positive i, j indices and row[2:4] are the
-        negative indices
+    pairs = numpy array of positive / negative examples
+        (see documentation of text_to_pairs for a detailed description)
     Npairs = number of training examples in this set
     '''
-    cdef size_t k, posi, posj, negi, negj, pos_neg, i, j
+    cdef size_t k, posi, posj, negi, negj, pos_neg, i, j, center_index
     cdef DTYPE_t loss
     cdef DTYPE_t pos_energy, neg_energy
     cdef DTYPE_t fac
@@ -1026,7 +1029,7 @@ cdef void train_batch(
     # make one vector of length 4 * K, then partition it up for
     # the four different types of gradients
     # in the spherical case dsigmai, j need to be size 1, but size K
-    # in diagnoanl case.  To save code complexity we'll always allocate as
+    # in diagonal case.  To save code complexity we'll always allocate as
     # size K since K is small
     cdef DTYPE_t* work = <DTYPE_t*>malloc(K * 4 * sizeof(DTYPE_t))
     cdef DTYPE_t* dmui = work
@@ -1038,10 +1041,11 @@ cdef void train_batch(
 
         # compute the loss
         # loss = max(0.0, Closs - energy(pos) + energy(neg))
-        posi = pairs[k * 4]
-        posj = pairs[k * 4 + 1]
-        negi = pairs[k * 4 + 2]
-        negj = pairs[k * 4 + 3]
+        posi = pairs[k * 5]
+        posj = pairs[k * 5 + 1]
+        negi = pairs[k * 5 + 2]
+        negj = pairs[k * 5 + 3]
+        center_index = pairs[k * 5 + 4]
 
         pos_energy = energy_func(posi, posj,
             mu_ptr, sigma_ptr, covariance_type, N, K)
@@ -1058,8 +1062,8 @@ cdef void train_batch(
         # except the sign of update
         for pos_neg in range(2):
             # this is a trick to get the right indices
-            i = pairs[k * 4 + pos_neg * 2]
-            j = pairs[k * 4 + pos_neg * 2 + 1]
+            i = pairs[k * 5 + pos_neg * 2]
+            j = pairs[k * 5 + pos_neg * 2 + 1]
             if pos_neg == 0:
                 fac = -1.0
             else:
