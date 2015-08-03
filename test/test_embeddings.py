@@ -191,11 +191,27 @@ class TestGaussianEmbedding(unittest.TestCase):
         self._check_results(embed)
 
 
-    def test_phrases_to_vector(self):
+    def test_phrases_to_vector1(self):
         self.embed = sample_embed()
         vocab = sample_vocab()
         target = [["new"], ["york"]]
         res = np.array([-1. , 1.25])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
+
+    def test_phrases_to_vector2(self):
+        self.embed = sample_embed()
+        vocab = sample_vocab()
+        target = [["new"], []]
+        res = np.array([0. , 0])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
+
+    def test_phrases_to_vector3(self):
+        self.embed = sample_embed()
+        vocab = sample_vocab()
+        target = [["new"], [""]]
+        res = np.array([0. , 0])
         vec = self.embed.phrases_to_vector(target, vocab=vocab)
         test.assert_array_equal(vec, res)
 
