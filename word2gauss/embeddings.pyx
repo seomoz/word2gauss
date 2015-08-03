@@ -73,23 +73,32 @@ COV_MAP = {1: 'spherical', 2: 'diagonal'}
 # define a generic interface for energy and gradient functions
 # (e.g. symmetric or KL-divergence).  This defines a type for the function...
 
+# in the energy / gradient functions, here is the encoding for
+# center_index:
+#  0 : i is center word, j is context
+#  1 : j is center word, i is context
+#  2 : both i and j are "center" (use center embeddings -- called
+#      only in wrappers)
+
 # interface for an energy function
 # energy(i, j, # word indices to compute energy for
+#        center_index,
 #        mu_ptr,  # pointer to mu array
 #        sigma_ptr,  # pointer to sigma array
 #        covariance_type (SPHERICAL, etc)
 #        nwords, ndimensions)
-ctypedef DTYPE_t (*energy_t)(size_t, size_t,
+ctypedef DTYPE_t (*energy_t)(size_t, size_t, size_t,
     DTYPE_t*, DTYPE_t*, uint32_t, size_t, size_t) nogil
 
 # interface for a gradient function
 # gradient(i, j, # word indices to compute energy for
+#          center_index,
 #          dEdmui_ptr, dEdsigma1_ptr, dEdmuj_ptr, dEdsigmaj_ptr
 #          mu_ptr,  # pointer to mu array
 #          sigma_ptr,  # pointer to sigma array
 #          covariance_type (SPHERICAL, etc)
 #          nwords, ndimensions)
-ctypedef void (*gradient_t)(size_t, size_t,
+ctypedef void (*gradient_t)(size_t, size_t, size_t,
     DTYPE_t*, DTYPE_t*, DTYPE_t*, DTYPE_t*,
     DTYPE_t*, DTYPE_t*, uint32_t, size_t, size_t) nogil
 
@@ -678,7 +687,7 @@ cdef class GaussianEmbedding:
         '''
         cdef energy_t efunc
         if func is None:
-            return self.energy_func(i, j,
+            return self.energy_func(i, j, 2,
                 self.mu_ptr, self.sigma_ptr, self.covariance_type,
                 self.N, self.K)
         else:
@@ -688,7 +697,7 @@ cdef class GaussianEmbedding:
                 efunc = <energy_t>kl_energy
             else:
                 raise ValueError
-            return efunc(i, j,
+            return efunc(i, j, 2,
                 self.mu_ptr, self.sigma_ptr, self.covariance_type,
                 self.N, self.K)
 
@@ -713,14 +722,53 @@ cdef class GaussianEmbedding:
             dsigmai = np.zeros(self.K, dtype=DTYPE)
             dsigmaj = np.zeros(self.K, dtype=DTYPE)
 
-        self.gradient_func(i, j,
+        self.gradient_func(i, j, 2,
             &dmui[0], &dsigmai[0], &dmuj[0], &dsigmaj[0],
             self.mu_ptr, self.sigma_ptr, self.covariance_type,
             self.N, self.K)
         return (dmui, dsigmai), (dmuj, dsigmaj)
 
 
-cdef DTYPE_t kl_energy(size_t i, size_t j,
+cdef void _get_muij(size_t i, size_t j, size_t center_index,
+    size_t N, size_t K,
+    DTYPE_t* mu_ptr, DTYPE_t** mui_ptr, DTYPE_t** muj_ptr) nogil:
+    # get pointers to mu[i] and mu[j] depending on the center_index
+    # to modify the pointers we need to pass pointers to pointers
+    # and use mu_ptr[0] instead of *mu_ptr
+
+    if center_index == 0:
+        mui_ptr[0] = mu_ptr + i * K
+        muj_ptr[0] = mu_ptr + (j + N) * K
+    elif center_index == 1:
+        mui_ptr[0] = mu_ptr + (i + N) * K
+        muj_ptr[0] = mu_ptr + j * K
+    else:
+        mui_ptr[0] = mu_ptr + i * K
+        muj_ptr[0] = mu_ptr + j * K
+
+cdef void _get_sigmaij(size_t i, size_t j, size_t center_index,
+    uint32_t covariance_type, size_t N, size_t K,
+    DTYPE_t* sigma_ptr, DTYPE_t** sigmai_ptr, DTYPE_t** sigmaj_ptr) nogil:
+
+    cdef size_t fac
+
+    if covariance_type == SPHERICAL:
+        fac = 1
+    elif covariance_type == DIAGONAL:
+        fac = K
+
+    if center_index == 0:
+        sigmai_ptr[0] = sigma_ptr + i * fac
+        sigmaj_ptr[0] = sigma_ptr + (j + N) * fac
+    elif center_index == 1:
+        sigmai_ptr[0] = sigma_ptr + (i + N) * fac
+        sigmaj_ptr[0] = sigma_ptr + j * fac
+    else:
+        sigmai_ptr[0] = sigma_ptr + i * fac
+        sigmaj_ptr[0] = sigma_ptr + j * fac
+
+
+cdef DTYPE_t kl_energy(size_t i, size_t j, size_t center_index,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
@@ -743,14 +791,15 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
     cdef size_t k
 
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[j] / sigma[i]) = log det sigmaj - log det sigmai
         #   det = sigma ** K  SO
         # = K * (log(sigmaj) - log(sigmai)) = K * log(sigma j / sigmai)
-        sigma_ratio = sigma_ptr[j] / sigma_ptr[i]
+        sigma_ratio = sigmaj_ptr[0] / sigmai_ptr[0]
         det_fac = K * log(sigma_ratio)
         trace_fac = K * sigma_ratio
 
@@ -761,7 +810,7 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
         return -0.5 * (
             trace_fac
-            + mu_diff_sq / sigma_ptr[i]
+            + mu_diff_sq / sigmai_ptr[0]
             - K - det_fac
         )
 
@@ -776,9 +825,6 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         # = SUM (log (Sigmaj[k] / Sigmai[k]))
         # = log (prod Sigmaj[k] / Sigmai[k])
 
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
-
         trace_fac = 0.0
         mu_diff_sq = 0.0
         det_fac = 1.0
@@ -792,7 +838,7 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         return -0.5 * (trace_fac + mu_diff_sq - K - log(det_fac))
 
 
-cdef void kl_gradient(size_t i, size_t j,
+cdef void kl_gradient(size_t i, size_t j, size_t center_index,
     DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
     DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
@@ -819,8 +865,12 @@ cdef void kl_gradient(size_t i, size_t j,
 
     cdef DTYPE_t* mui_ptr
     cdef DTYPE_t* muj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # compute deltaprime and assign it to dEdmu
@@ -830,7 +880,7 @@ cdef void kl_gradient(size_t i, size_t j,
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
-        one_over_si = 1.0 / sigma_ptr[i]
+        one_over_si = 1.0 / sigmai_ptr[0]
         for k in xrange(K):
             deltaprime = one_over_si * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
@@ -838,16 +888,16 @@ cdef void kl_gradient(size_t i, size_t j,
             sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
-            sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
+            sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
             + sum_deltaprime2 / K
-            - (1.0 / sigma_ptr[i])
+            - (1.0 / sigmai_ptr[0])
         )
-        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigma_ptr[j] - 1.0 / sigma_ptr[i])
+        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0])
 
     elif covariance_type == DIAGONAL:
         for k in xrange(K):
-            si = sigma_ptr[i * K + k]
-            sj = sigma_ptr[j * K + k]
+            si = sigmai_ptr[k]
+            sj = sigmaj_ptr[k]
 
             # compute deltaprime and assign it to dEdmu
             deltaprime = (1.0 / si) * (mui_ptr[k] - muj_ptr[k])
@@ -857,8 +907,8 @@ cdef void kl_gradient(size_t i, size_t j,
         # splitting the loop here and writting sj / si ** 2 as below
         # allows vectorization
         for k in xrange(K):
-            si = sigma_ptr[i * K + k]
-            sj = sigma_ptr[j * K + k]
+            si = sigmai_ptr[k]
+            sj = sigmaj_ptr[k]
             deltaprime = dEdmuj_ptr[k]
 
             # writing sj / si ** 2 like this allows vectorization
@@ -876,7 +926,7 @@ cdef void kl_gradient(size_t i, size_t j,
             dEdsigmaj_ptr[k] = 0.5 * (1.0 / sj - 1.0 / si)
 
 
-cdef DTYPE_t ip_energy(size_t i, size_t j,
+cdef DTYPE_t ip_energy(size_t i, size_t j, size_t center_index,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
@@ -900,14 +950,16 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
     cdef DTYPE_t* muj_ptr
     cdef DTYPE_t* sigmai_ptr
     cdef DTYPE_t* sigmaj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[i] + sigma[j]))
         # = log ((sigma[i] + sigma[j]) ** K)
         # = K * log(sigmai + sigmaj)
-        det_fac = K * log(sigma_ptr[i] + sigma_ptr[j])
+        det_fac = K * log(sigmai_ptr[0] + sigmaj_ptr[0])
 
         mu_diff_sq = 0.0
         for k in range(K):
@@ -916,7 +968,7 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
 
         return -0.5 * (
             det_fac +
-            mu_diff_sq / (sigma_ptr[i] + sigma_ptr[j]) +
+            mu_diff_sq / (sigmai_ptr[0] + sigmaj_ptr[0]) +
             K * log_2_pi
         )
 
@@ -925,9 +977,6 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
         # = log PROD (sigma[i] + sigma[j])
         # = SUM log (sigma[i] + sigma[j])
         # = log prod (sigma[i] + sigma[j])
-
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
 
         det_fac = 1.0
         mu_diff_sq = 0.0
@@ -941,7 +990,7 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
         return -0.5 * (log(det_fac) + mu_diff_sq + K * log_2_pi)
 
 
-cdef void ip_gradient(size_t i, size_t j,
+cdef void ip_gradient(size_t i, size_t j, size_t center_index,
     DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
     DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
@@ -961,12 +1010,14 @@ cdef void ip_gradient(size_t i, size_t j,
     cdef DTYPE_t* muj_ptr
     cdef DTYPE_t* sigmai_ptr
     cdef DTYPE_t* sigmaj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # compute delta and assign it to dEdmu
-        sigmai_plus_sigmaj_inv = 1.0 / (sigma_ptr[i] + sigma_ptr[j])
+        sigmai_plus_sigmaj_inv = 1.0 / (sigmai_ptr[0] + sigmaj_ptr[0])
         # we'll sum up delta ** 2 too
         sum_delta2 = 0.0
         for k in xrange(K):
@@ -982,9 +1033,6 @@ cdef void ip_gradient(size_t i, size_t j,
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 
     elif covariance_type == DIAGONAL:
-
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
 
         for k in xrange(K):
             sigmai_plus_sigmaj = sigmai_ptr[k] + sigmaj_ptr[k]
@@ -1047,9 +1095,9 @@ cdef void train_batch(
         negj = pairs[k * 5 + 3]
         center_index = pairs[k * 5 + 4]
 
-        pos_energy = energy_func(posi, posj,
+        pos_energy = energy_func(posi, posj, center_index,
             mu_ptr, sigma_ptr, covariance_type, N, K)
-        neg_energy = energy_func(negi, negj,
+        neg_energy = energy_func(negi, negj, center_index,
             mu_ptr, sigma_ptr, covariance_type, N, K)
         loss = Closs - pos_energy + neg_energy
 
@@ -1070,7 +1118,7 @@ cdef void train_batch(
                 fac = 1.0
 
             # compute the gradients
-            gradient_func(i, j,
+            gradient_func(i, j, center_index,
                 dmui, dsigmai, dmuj, dsigmaj,
                 mu_ptr, sigma_ptr, covariance_type, N, K)
 
