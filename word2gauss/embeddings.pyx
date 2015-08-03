@@ -99,6 +99,13 @@ cdef class GaussianEmbedding:
     Represent words as gaussian distributions
 
     Holds model parameters, deals with serialization and learning.
+
+    We learn separate embeddings for the focus and context words,
+    similar to word2vec.  Each set of parameters (mu, sigma, etc)
+    are all stored as one matrix where the first N rows correspond
+    to the focus parameters and the second N rows correspond
+    to the context parameters.
+
     Attributes:
         N = number of words
         K = dimension of each representation
@@ -1147,6 +1154,16 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
     '''
     Take a chunk of text and turn it into a array of pairs for training.
 
+    The return array pairs is size (npairs, 5).
+    Each row is one training example.  The first two entries are the
+    token ids for the positive example and the second two entries
+    are the token ids for the negative example.  The final entry
+    is either 0 or 1 with encoding whether the left (0) or right (1)
+    id is the center word.  For example, this row:
+        [3, 122, 3, 910, 0]
+    means: word id's 3 and 122 occur in a context window, word ids 3 and 910
+    are the negative sample and the 0 signals word 3 is the center word.
+
     text is a list of text documents / sentences.
 
     Each element of the list is a numpy array of uint32_t IDs, with -1
@@ -1171,7 +1188,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
 
     # allocate pairs and draw random numbers
     cdef np.ndarray[uint32_t, ndim=2, mode='c'] pairs = np.empty(
-        (npairs, 4), dtype=np.uint32)
+        (npairs, 5), dtype=np.uint32)
     cdef np.ndarray[uint32_t] randids = random_gen(npairs)
     cdef np.ndarray[uint32_t, ndim=1, mode='c'] cdoc
 
@@ -1198,6 +1215,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     pairs[next_pair, 1] = cdoc[j]
                     pairs[next_pair, 2] = cdoc[i]
                     pairs[next_pair, 3] = randids[next_pair]
+                    pairs[next_pair, 4] = 0
                     next_pair += 1
 
                     # now sample i
@@ -1205,6 +1223,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     pairs[next_pair, 1] = cdoc[j]
                     pairs[next_pair, 2] = randids[next_pair]
                     pairs[next_pair, 3] = cdoc[j]
+                    pairs[next_pair, 4] = 1
                     next_pair += 1
 
     return np.ascontiguousarray(pairs[:next_pair, :])
