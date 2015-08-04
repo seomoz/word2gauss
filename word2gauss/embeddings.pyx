@@ -377,8 +377,12 @@ cdef class GaussianEmbedding:
             training, model parameters)
 
         It has files:
-            word_mu: the word2vec file with word/id and mu vectors
-            sigma: the sigma for each vector, one per line
+            word_mu: the word2vec file with word/id and mu vectors of
+                center words.
+            mu_context: mu vectors for context embeddings, one per line
+            sigma: the sigma for each vector, one per line.  The first
+                N lines correspond to sigma for the center words and 
+                the next N lines correspond to sigma for the context words
             acc_grad_mu and acc_grad_sigma: one value per line/word with
                 accumulated gradient sums
             parameters: json file with model parameters (hyperparameters, etc)
@@ -416,6 +420,9 @@ cdef class GaussianEmbedding:
                 write_word2vec(tmp)
                 tmp.seek(0)
                 fout.add(tmp.name, arcname='word_mu')
+
+            # context mu
+            save_array(self.mu[self.N:, :], 'mu_context', fout)
 
             # sigma, accumulated gradient
             save_array(self.sigma, 'sigma', fout)
@@ -468,6 +475,7 @@ cdef class GaussianEmbedding:
         '''
         N = self.N
         K = self.K
+        N2 = 2 * N
 
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
@@ -476,19 +484,22 @@ cdef class GaussianEmbedding:
 
         # set the data
         with open_tar(fname, 'r') as fin:
-            _mu = np.empty((N, K), dtype=DTYPE)
+            _mu = np.empty((2 * N, K), dtype=DTYPE)
             with closing(fin.extractfile('word_mu')) as f:
                 for i, line in enumerate(f):
                     ls = line.strip().split()
                     # ls[0] is the word/id, skip it.  rest are mu
                     _mu[i, :] = [float(ele) for ele in ls[1:]]
+            with closing(fin.extractfile('mu_context')) as f:
+                _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE).\
+                    reshape(N, -1).copy()
 
             with closing(fin.extractfile('sigma')) as f:
-                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, -1).copy()
+                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
             with closing(fin.extractfile('acc_grad_mu')) as f:
-                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
             with closing(fin.extractfile('acc_grad_sigma')) as f:
-                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
 
         self.mu = _mu
         assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
