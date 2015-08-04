@@ -12,7 +12,7 @@ def sample_vocab():
     vocab = utils.Vocabulary(ngrams)
     return vocab
 
-def sample_embed(energy_type='KL'):
+def sample_embed(energy_type='KL', covariance_type='spherical'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
@@ -128,7 +128,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             # the negative sample
             neg = (i, np.random.randint(0, 10))
-            
+
             # randomly sample whether left or right is context word
             context_index = np.random.randint(0, 2)
 
@@ -151,7 +151,7 @@ class TestGaussianEmbedding(unittest.TestCase):
     def test_model_update(self):
         for covariance_type, sigma_shape1 in [
                 ('spherical', 1), ('diagonal', 2)]:
-            embed = sample_embed(covariance_type=covariance_type)
+            embed = sample_embed(energy_type='IP', covariance_type=covariance_type)
             embed.update(5)
 
             self.assertEquals(embed.mu.shape, (10, 2))
@@ -192,7 +192,8 @@ class TestGaussianEmbedding(unittest.TestCase):
 
 
     def test_phrases_to_vector1(self):
-        self.embed = sample_embed()
+        self.embed = sample_embed(energy_type='IP',
+            covariance_type='spherical')
         vocab = sample_vocab()
         target = [["new"], ["york"]]
         res = np.array([-1. , 1.25])
@@ -200,7 +201,8 @@ class TestGaussianEmbedding(unittest.TestCase):
         test.assert_array_equal(vec, res)
 
     def test_phrases_to_vector2(self):
-        self.embed = sample_embed()
+        self.embed = sample_embed(energy_type='IP',
+            covariance_type='spherical')
         vocab = sample_vocab()
         target = [["new"], []]
         res = np.array([0. , 0])
@@ -208,7 +210,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         test.assert_array_equal(vec, res)
 
     def test_phrases_to_vector3(self):
-        self.embed = sample_embed()
+        self.embed = sample_embed(energy_type='IP', covariance_type='spherical')
         vocab = sample_vocab()
         target = [["new"], [""]]
         res = np.array([0. , 0])
@@ -216,7 +218,6 @@ class TestGaussianEmbedding(unittest.TestCase):
         test.assert_array_equal(vec, res)
 
     def test_train_batch_IP_spherical(self):
-        handle multiple comma separated phrases
         training_data = self._training_data()
 
         embed = GaussianEmbedding(10, 5,
