@@ -9,8 +9,8 @@ conda_deps='pip numpy scipy'
 conda create -p $HOME/py --yes $conda_deps "python=$TRAVIS_PYTHON_VERSION"
 export PATH=$HOME/py/bin:$PATH
 pip install -r requirements.txt
-python setup.py build_ext --inplace
 
+mkdir ~/git
 (
     cd ~/git
     git clone https://github.com/seomoz/vocab.git
@@ -20,3 +20,4 @@ python setup.py build_ext --inplace
         python setup.py install
     )
 )
+python setup.py build_ext --inplace
