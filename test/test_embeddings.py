@@ -3,13 +3,13 @@ import unittest
 import numpy as np
 import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
-from topical import utils
+import vocab as v
 
 DTYPE = np.float32
 
 def sample_vocab():
     ngrams = [{'new':0, 'york':1, 'city':2}]
-    vocab = utils.Vocabulary(ngrams)
+    vocab = v.vocab.Vocabulary(ngrams)
     return vocab
 
 def sample_embed(energy_type='KL', covariance_type='spherical'):
