@@ -6,16 +6,5 @@ script: make test
 cache:
   - apt
   - pip
+install: ./provision.sh
 
-install:
-  - git clone https://github.com/seomoz/vocab.git
-  - cd ~/vocab
-  - sudo pip install -r requirements.txt
-  - python setup.py install
-  - sudo apt-get -y install libatlas-base-dev libatlas-dev lib{blas,lapack}-dev gfortran
-  - sudo pip install conda
-  - conda_deps='pip numpy scipy'
-  - conda create -p $HOME/py --yes $conda_deps "python=$TRAVIS_PYTHON_VERSION"
-  - export PATH=$HOME/py/bin:$PATH
-  - pip install -r requirements.txt
-  - python setup.py build_ext --inplace
