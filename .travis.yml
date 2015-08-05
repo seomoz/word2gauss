@@ -6,7 +6,7 @@ script: make test
 cache:
   - apt
   - pip
-before_install:
+before_script:
     - git clone https://github.com/seomoz/vocab.git
     - cd ~/git/vocab
     - pip install -r requirements.txt
