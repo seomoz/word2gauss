@@ -1153,6 +1153,7 @@ cdef void train_batch(
 
     free(work)
 
+
 cdef void _accumulate_update(
     size_t k, DTYPE_t* dmu, DTYPE_t* dsigma,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
@@ -1168,10 +1169,15 @@ cdef void _accumulate_update(
     cdef DTYPE_t l2_mu
     cdef DTYPE_t sig
 
+    cdef DTYPE_t max_grad = 10.0
+
     # update for mu
     # first update the accumulated gradient for adagrad
     sum_dmu2 = 0.0
     for i in range(K):
+        # clip gradients
+        dmu[i] = (max_grad if dmu[i] > max_grad else dmu[i])
+        dmu[i] = (-max_grad if dmu[i] < -max_grad else dmu[i])
         sum_dmu2 += dmu[i] * dmu[i]
     sum_dmu2 /= K
     acc_grad_mu[k] += sum_dmu2
@@ -1194,6 +1200,8 @@ cdef void _accumulate_update(
 
     # now for Sigma
     if covariance_type == SPHERICAL:
+        dsigma[0] = (max_grad if dsigma[0] > max_grad else dsigma[0])
+        dsigma[0] = (-max_grad if dsigma[0] < -max_grad else dsigma[0])
         acc_grad_sigma[k] += dsigma[0] * dsigma[0]
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         sigma_ptr[k] -= fac * local_eta * dsigma[0]
@@ -1205,6 +1213,8 @@ cdef void _accumulate_update(
     elif covariance_type == DIAGONAL:
         sum_dsigma = 0.0
         for i in xrange(K):
+            dsigma[i] = (max_grad if dsigma[i] > max_grad else dsigma[i])
+            dsigma[i] = (-max_grad if dsigma[i] < -max_grad else dsigma[i])
             sum_dsigma += dsigma[i] * dsigma[i]
         sum_dsigma /= K
         acc_grad_sigma[k] += sum_dsigma
