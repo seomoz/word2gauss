@@ -10,10 +10,14 @@ conda create -p $HOME/py --yes $conda_deps "python=$TRAVIS_PYTHON_VERSION"
 export PATH=$HOME/py/bin:$PATH
 pip install -r requirements.txt
 
-
-git clone https://github.com/seomoz/vocab.git
-cd ~/vocab
-pip install -r requirements.txt
-make install
-
+mkdir ~/git
+(
+    cd ~/git
+    git clone https://github.com/seomoz/vocab.git
+    (
+        cd ~/git/vocab
+        pip install -r requirements.txt
+        python setup.py build_ext --inplace
+    )
+)
 python setup.py build_ext --inplace
