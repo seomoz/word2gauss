@@ -120,10 +120,10 @@ cdef class GaussianEmbedding:
         K = dimension of each representation
         mu = (2N, K)
         sigma = either (2N, 1) array (for spherical) or (2N, K) (for diagonal)
-        acc_grad_mu = (2N, ) array, the accumulated gradients for each
+        acc_grad_mu = (2N, K) array, the accumulated gradients for each
             mu update
-        acc_grad_sigma = (2N, ) array, the accumulated gradients for each
-            sigma
+        acc_grad_sigma = (2N, 1) or (2N, K) array with the accumulated
+            gradients for each sigma
 
     Since we use Cython we also store the C pointer to the underlying
     raw data.
@@ -197,8 +197,8 @@ cdef class GaussianEmbedding:
         '''
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_mu
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_sigma
 
         if covariance_type == 'spherical':
             self.covariance_type = SPHERICAL
@@ -261,15 +261,22 @@ cdef class GaussianEmbedding:
         self.sigma_ptr = &_sigma[0, 0]
 
         # working space for accumulated gradients
-        _acc_grad_mu = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
+        _acc_grad_mu = np.ascontiguousarray(
+            np.zeros((2 * N, self.K), dtype=DTYPE))
         assert _acc_grad_mu.flags['C_CONTIGUOUS']
         self.acc_grad_mu = _acc_grad_mu
-        self.acc_grad_mu_ptr = &_acc_grad_mu[0]
+        self.acc_grad_mu_ptr = &_acc_grad_mu[0, 0]
 
-        _acc_grad_sigma = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
+
+        if self.covariance_type == SPHERICAL:
+            _acc_grad_sigma = np.ascontiguousarray(
+                np.zeros((2 * N, 1), dtype=DTYPE))
+        elif self.covariance_type == DIAGONAL:
+            _acc_grad_sigma = np.ascontiguousarray(
+                np.zeros((2 * N, self.K), dtype=DTYPE))
         assert _acc_grad_sigma.flags['C_CONTIGUOUS']
         self.acc_grad_sigma = _acc_grad_sigma
-        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
+        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0, 0]
 
     def update(self, N, init_params={
             'mu0': 0.1,
@@ -290,8 +297,8 @@ cdef class GaussianEmbedding:
         '''
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_mu
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_sigma
 
         LOGGER.info("New vocab size %i" % N)
         LOGGER.info("Old vocab size %i" % self.N)
@@ -335,28 +342,32 @@ cdef class GaussianEmbedding:
             self.sigma_ptr = &_sigma[0, 0]
 
             # update acc_grad_mu
-            _acc_grad_mu = np.ascontiguousarray(np.hstack([
-                self.acc_grad_mu[:self.N],
-                np.zeros(n_words, dtype=DTYPE),
-                self.acc_grad_mu[self.N:],
-                np.zeros(n_words, dtype=DTYPE)
+            _acc_grad_mu = np.ascontiguousarray(np.vstack([
+                self.acc_grad_mu[:self.N, :],
+                np.zeros((n_words, self.K), dtype=DTYPE),
+                self.acc_grad_mu[self.N:, :],
+                np.zeros((n_words, self.K), dtype=DTYPE)
             ]))
             self.acc_grad_mu = _acc_grad_mu
             assert _acc_grad_mu.flags['C_CONTIGUOUS'] and \
                 _acc_grad_mu.flags['OWNDATA']
-            self.acc_grad_mu_ptr = &_acc_grad_mu[0]
+            self.acc_grad_mu_ptr = &_acc_grad_mu[0, 0]
 
             # update acc_grad_sigma
-            _acc_grad_sigma = np.ascontiguousarray(np.hstack([
-                self.acc_grad_sigma[:self.N],
-                np.zeros(n_words, dtype=DTYPE),
-                self.acc_grad_sigma[self.N:],
-                np.zeros(n_words, dtype=DTYPE)
+            if self.covariance_type == SPHERICAL:
+                sigma_dim = 1
+            elif self.covariance_type == DIAGONAL:
+                sigma_dim = self.K
+            _acc_grad_sigma = np.ascontiguousarray(np.vstack([
+                self.acc_grad_sigma[:self.N, :],
+                np.zeros((n_words, sigma_dim), dtype=DTYPE),
+                self.acc_grad_sigma[self.N:, :],
+                np.zeros((n_words, sigma_dim), dtype=DTYPE)
             ]))
             self.acc_grad_sigma = _acc_grad_sigma
             assert _acc_grad_sigma.flags['C_CONTIGUOUS'] and \
                 _acc_grad_sigma.flags['OWNDATA']
-            self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
+            self.acc_grad_sigma_ptr = &_acc_grad_sigma[0, 0]
 
             self.N = N
 
@@ -479,8 +490,8 @@ cdef class GaussianEmbedding:
 
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_mu
-        cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_mu
+        cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_sigma
 
         # set the data
         with open_tar(fname, 'r') as fin:
@@ -497,9 +508,10 @@ cdef class GaussianEmbedding:
             with closing(fin.extractfile('sigma')) as f:
                 _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
             with closing(fin.extractfile('acc_grad_mu')) as f:
-                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
+                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2, K).copy()
             with closing(fin.extractfile('acc_grad_sigma')) as f:
-                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
+                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).\
+                    reshape(N2, -1).copy()
 
         self.mu = _mu
         assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
@@ -514,14 +526,14 @@ cdef class GaussianEmbedding:
             self.acc_grad_mu.flags['C_CONTIGUOUS'] and
             self.acc_grad_mu.flags['OWNDATA']
         )
-        self.acc_grad_mu_ptr = &_acc_grad_mu[0]
+        self.acc_grad_mu_ptr = &_acc_grad_mu[0, 0]
 
         self.acc_grad_sigma = _acc_grad_sigma
         assert (
             self.acc_grad_sigma.flags['C_CONTIGUOUS'] and
             self.acc_grad_sigma.flags['OWNDATA']
         )
-        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
+        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0, 0]
 
 
     def get_phrases_vector(self, phrases, vocab):
@@ -1201,7 +1213,6 @@ cdef void _accumulate_update(
 
     # accumulate the gradients and update
     cdef size_t i
-    cdef DTYPE_t sum_dmu2, sum_dsigma
     cdef DTYPE_t local_eta
     cdef DTYPE_t l2_mu
     cdef DTYPE_t sig
@@ -1209,23 +1220,18 @@ cdef void _accumulate_update(
     cdef DTYPE_t max_grad = 10.0
 
     # update for mu
-    # first update the accumulated gradient for adagrad
-    sum_dmu2 = 0.0
+    l2_mu = 0.0
     for i in range(K):
         # clip gradients
         dmu[i] = (max_grad if dmu[i] > max_grad else dmu[i])
         dmu[i] = (-max_grad if dmu[i] < -max_grad else dmu[i])
-        sum_dmu2 += dmu[i] * dmu[i]
-    sum_dmu2 /= K
-    acc_grad_mu[k] += sum_dmu2
-
-    # now get local learning rate for this word
-    local_eta = eta / (sqrt(acc_grad_mu[k]) + 1.0)
-
-    # finally update mu
-    l2_mu = 0.0
-    for i in range(K):
+        # update the accumulated gradient for adagrad
+        acc_grad_mu[k * K + i] += dmu[i] * dmu[i]
+        # now get local learning rate for this word
+        local_eta = eta / (sqrt(acc_grad_mu[k * K + i]) + 1.0)
+        # finally update mu
         mu_ptr[k * K + i] -= fac * local_eta * dmu[i]
+        # accumulate L2 norm of mu for regularization
         l2_mu += mu_ptr[k * K + i] * mu_ptr[k * K + i]
     l2_mu = sqrt(l2_mu)
 
@@ -1248,15 +1254,15 @@ cdef void _accumulate_update(
             sigma_ptr[k] = m
 
     elif covariance_type == DIAGONAL:
-        sum_dsigma = 0.0
         for i in xrange(K):
+            # clip gradients
             dsigma[i] = (max_grad if dsigma[i] > max_grad else dsigma[i])
             dsigma[i] = (-max_grad if dsigma[i] < -max_grad else dsigma[i])
-            sum_dsigma += dsigma[i] * dsigma[i]
-        sum_dsigma /= K
-        acc_grad_sigma[k] += sum_dsigma
-        local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
-        for i in xrange(K):
+            # update the accumulated gradient for adagrad
+            acc_grad_sigma[k * K + i] += dsigma[i] * dsigma[i]
+            # now get local learning rate for this word
+            local_eta = eta / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
+            # finally update sigma
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
             # bound sigma between m and M
             # note: the ternary operator instead of if statment

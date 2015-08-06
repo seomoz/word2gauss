@@ -177,8 +177,8 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             self.assertEquals(embed.mu.shape, (10, 2))
             self.assertEquals(embed.sigma.shape, (10, sigma_shape1))
-            self.assertEquals(embed.acc_grad_mu.shape, (10, ))
-            self.assertEquals(embed.acc_grad_sigma.shape, (10, ))
+            self.assertEquals(embed.acc_grad_mu.shape, (10, 2))
+            self.assertEquals(embed.acc_grad_sigma.shape, (10, sigma_shape1))
 
             self.assertEquals(embed.N, 5)
 
