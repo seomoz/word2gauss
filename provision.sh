@@ -21,4 +21,4 @@ mkdir ~/git
     )
 )
 python setup.py build_ext --inplace
-export PATH=$HOME/py/bin:$PATH
+export PATH=$HOME/py/lib:$HOME/py/bin:$PATH
