@@ -3,6 +3,7 @@ sudo: required
 python:
   - 2.7
 script:
+  - export PATH=$HOME/py/bin:$PATH
   - make test
 cache:
   - apt
