@@ -13,7 +13,7 @@ pip install cython>=0.21.1
 mkdir ~/git
 (
     cd ~/git
-    git clone https://github.com:seomoz/vocab.git
+    git clone https://github.com/seomoz/vocab.git
     (
         cd ~/git/vocab
         pip install -r requirements.txt
