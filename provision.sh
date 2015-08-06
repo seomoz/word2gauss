@@ -8,7 +8,8 @@ sudo pip install conda
 conda_deps='pip numpy scipy'
 conda create -p $HOME/py --yes $conda_deps "python=$TRAVIS_PYTHON_VERSION"
 pip install -r requirements.txt
-
+python setup.py build_ext --inplace
+export PATH=$HOME/py/bin:$PATH
 
 mkdir ~/git
 (
@@ -20,5 +21,4 @@ mkdir ~/git
         python setup.py build_ext --inplace
     )
 )
-python setup.py build_ext --inplace
-export PATH=$HOME/py/bin:$PATH
+
