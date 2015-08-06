@@ -7,7 +7,7 @@ sudo apt-get -y install libatlas-base-dev libatlas-dev lib{blas,lapack}-dev gfor
 sudo pip install conda
 conda_deps='pip numpy scipy'
 conda create -p $HOME/py --yes $conda_deps "python=$TRAVIS_PYTHON_VERSION"
-export PATH=$HOME/py/bin:$PATH
+
 pip install -r requirements.txt
 
 mkdir ~/git
@@ -21,3 +21,4 @@ mkdir ~/git
     )
 )
 python setup.py build_ext --inplace
+export PATH=$HOME/py/bin:$PATH
