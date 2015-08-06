@@ -22,7 +22,7 @@ mkdir ~/git
     (
         cd ~/git/vocab
         pip install -r requirements.txt
-        python setup.py build_ext --inplace
+        python setup.py install
     )
 )
 
