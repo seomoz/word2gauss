@@ -11,19 +11,28 @@ def sample_embed(energy_type='KL', covariance_type='spherical'):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
-        [-0.1, -0.4]
+        [-0.1, -0.4],
+        [1.2, -0.3],
+        [0.5, 0.5],
+        [-0.55, -0.75]
     ], dtype=DTYPE)
     if covariance_type == 'spherical':
         sigma = np.array([
             [1.0],
             [5.0],
-            [0.8]
+            [0.8],
+            [0.4],
+            [1.5],
+            [1.4]
         ], dtype=DTYPE)
     elif covariance_type == 'diagonal':
         sigma = np.array([
             [1.0, 0.1],
             [5.0, 5.5],
-            [0.8, 1.1]
+            [0.8, 1.1],
+            [0.9, 1.9],
+            [0.65, 0.9],
+            [1.5, 1.55]
         ], dtype=DTYPE)
 
     return GaussianEmbedding(3, size=2,
@@ -97,7 +106,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         # number of sample to do
         nsamples = 100000
-        training_data = np.empty((nsamples, 4), dtype=np.uint32)
+        training_data = np.empty((nsamples, 5), dtype=np.uint32)
         for k in xrange(nsamples):
             i = np.random.randint(0, 10)
 
@@ -114,8 +123,11 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             # the negative sample
             neg = (i, np.random.randint(0, 10))
+            
+            # randomly sample whether left or right is context word
+            context_index = np.random.randint(0, 2)
 
-            training_data[k, :] = pos + neg
+            training_data[k, :] = pos + neg + (context_index, )
 
         return training_data
 
@@ -136,8 +148,13 @@ class TestGaussianEmbedding(unittest.TestCase):
                 ('spherical', 1), ('diagonal', 2)]:
             embed = sample_embed(covariance_type=covariance_type)
             embed.update(5)
-            self.assertEquals(embed.mu.shape, (5, 2))
-            self.assertEquals(embed.sigma.shape, (5, sigma_shape1))
+
+            self.assertEquals(embed.mu.shape, (10, 2))
+            self.assertEquals(embed.sigma.shape, (10, sigma_shape1))
+            self.assertEquals(embed.acc_grad_mu.shape, (10, ))
+            self.assertEquals(embed.acc_grad_sigma.shape, (10, ))
+
+            self.assertEquals(embed.N, 5)
 
     def test_train_batch_KL_spherical(self):
         training_data = self._training_data()
@@ -145,7 +162,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
-            mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.0, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -175,7 +192,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='IP',
-            mu_max=1.0, sigma_min=0.8, sigma_max=1.2, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -189,7 +206,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='diagonal',
             energy_type='IP',
-            mu_max=1.0, sigma_min=0.8, sigma_max=1.2, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         for k in xrange(0, len(training_data), 100):
@@ -203,7 +220,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed = GaussianEmbedding(10, 5,
             covariance_type='spherical',
             energy_type='KL',
-            mu_max=1.0, sigma_min=0.1, sigma_max=1.0, eta=1.0, Closs=1.0
+            mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
         def iter_pairs():
@@ -224,26 +241,26 @@ class TestTexttoPairs(unittest.TestCase):
             np.array([10, 11], dtype=np.uint32)
         ]
         actual = text_to_pairs(text, r, nsamples_per_word=2)
-        expected = np.array([[ 1,  2,  1,  0],
-           [ 1,  2,  1,  2],
-           [ 1,  2,  1,  2],
-           [ 1,  2,  3,  2],
-           [ 1,  3,  1,  4],
-           [ 1,  3,  5,  3],
-           [ 1,  3,  1,  6],
-           [ 1,  3,  7,  3],
-           [ 2,  3,  2,  8],
-           [ 2,  3,  9,  3],
-           [ 2,  3,  2, 10],
-           [ 2,  3, 11,  3],
-           [ 4,  5,  4, 12],
-           [ 4,  5, 13,  5],
-           [ 4,  5,  4, 14],
-           [ 4,  5, 15,  5],
-           [10, 11, 10, 16],
-           [10, 11, 17, 11],
-           [10, 11, 10, 18],
-           [10, 11, 19, 11]], dtype=np.uint32)
+        expected = np.array([[ 1,  2,  1,  0, 0],
+           [ 1,  2,  1,  2, 1],
+           [ 1,  2,  1,  2, 0],
+           [ 1,  2,  3,  2, 1],
+           [ 1,  3,  1,  4, 0],
+           [ 1,  3,  5,  3, 1],
+           [ 1,  3,  1,  6, 0],
+           [ 1,  3,  7,  3, 1],
+           [ 2,  3,  2,  8, 0],
+           [ 2,  3,  9,  3, 1],
+           [ 2,  3,  2, 10, 0],
+           [ 2,  3, 11,  3, 1],
+           [ 4,  5,  4, 12, 0],
+           [ 4,  5, 13,  5, 1],
+           [ 4,  5,  4, 14, 0],
+           [ 4,  5, 15,  5, 1],
+           [10, 11, 10, 16, 0],
+           [10, 11, 17, 11, 1],
+           [10, 11, 10, 18, 0],
+           [10, 11, 19, 11, 1]], dtype=np.uint32)
         self.assertTrue((actual == expected).all())
 
 

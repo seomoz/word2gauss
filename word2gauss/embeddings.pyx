@@ -73,23 +73,32 @@ COV_MAP = {1: 'spherical', 2: 'diagonal'}
 # define a generic interface for energy and gradient functions
 # (e.g. symmetric or KL-divergence).  This defines a type for the function...
 
+# in the energy / gradient functions, here is the encoding for
+# center_index:
+#  0 : i is center word, j is context
+#  1 : j is center word, i is context
+#  2 : both i and j are "center" (use center embeddings -- called
+#      only in wrappers)
+
 # interface for an energy function
 # energy(i, j, # word indices to compute energy for
+#        center_index,
 #        mu_ptr,  # pointer to mu array
 #        sigma_ptr,  # pointer to sigma array
 #        covariance_type (SPHERICAL, etc)
 #        nwords, ndimensions)
-ctypedef DTYPE_t (*energy_t)(size_t, size_t,
+ctypedef DTYPE_t (*energy_t)(size_t, size_t, size_t,
     DTYPE_t*, DTYPE_t*, uint32_t, size_t, size_t) nogil
 
 # interface for a gradient function
 # gradient(i, j, # word indices to compute energy for
+#          center_index,
 #          dEdmui_ptr, dEdsigma1_ptr, dEdmuj_ptr, dEdsigmaj_ptr
 #          mu_ptr,  # pointer to mu array
 #          sigma_ptr,  # pointer to sigma array
 #          covariance_type (SPHERICAL, etc)
 #          nwords, ndimensions)
-ctypedef void (*gradient_t)(size_t, size_t,
+ctypedef void (*gradient_t)(size_t, size_t, size_t,
     DTYPE_t*, DTYPE_t*, DTYPE_t*, DTYPE_t*,
     DTYPE_t*, DTYPE_t*, uint32_t, size_t, size_t) nogil
 
@@ -99,15 +108,21 @@ cdef class GaussianEmbedding:
     Represent words as gaussian distributions
 
     Holds model parameters, deals with serialization and learning.
+
+    We learn separate embeddings for the focus and context words,
+    similar to word2vec.  Each set of parameters (mu, sigma, etc)
+    are all stored as one matrix where the first N rows correspond
+    to the focus parameters and the second N rows correspond
+    to the context parameters.
+
     Attributes:
         N = number of words
         K = dimension of each representation
-        mu = (N, K)
-        sigma = either (N, 1) array (for spherical) or (N, K) (for diagonal)
-            NOTE: diagnonal case not implemented yet
-        acc_grad_mu = (N, ) array, the accumulated gradients for each
+        mu = (2N, K)
+        sigma = either (2N, 1) array (for spherical) or (2N, K) (for diagonal)
+        acc_grad_mu = (2N, ) array, the accumulated gradients for each
             mu update
-        acc_grad_sigma = (N, ) array, the accumulated gradients for each
+        acc_grad_sigma = (2N, ) array, the accumulated gradients for each
             sigma
 
     Since we use Cython we also store the C pointer to the underlying
@@ -215,24 +230,24 @@ cdef class GaussianEmbedding:
 
         if mu is None:
             _mu = init_params['mu0'] * np.ascontiguousarray(
-                np.random.randn(self.N, self.K).astype(DTYPE))
+                np.random.randn(2 * self.N, self.K).astype(DTYPE))
         else:
-            assert mu.shape[0] == N
+            assert mu.shape[0] == 2 * N
             assert mu.shape[1] == self.K
             _mu = mu
         self.mu = _mu
 
         if sigma is None:
             if self.covariance_type == SPHERICAL:
-                s = np.random.randn(self.N, 1).astype(DTYPE)
+                s = np.random.randn(2 * self.N, 1).astype(DTYPE)
             elif self.covariance_type == DIAGONAL:
-                s = np.random.randn(self.N, self.K).astype(DTYPE)
+                s = np.random.randn(2 * self.N, self.K).astype(DTYPE)
             s *= init_params['sigma_std0']
             s += init_params['sigma_mean0']
             _sigma = np.ascontiguousarray(
                 np.maximum(sigma_min, np.minimum(s, sigma_max)))
         else:
-            assert sigma.shape[0] == N
+            assert sigma.shape[0] == 2 * N
             if self.covariance_type == SPHERICAL:
                 assert sigma.shape[1] == 1
             elif self.covariance_type == DIAGONAL:
@@ -246,12 +261,12 @@ cdef class GaussianEmbedding:
         self.sigma_ptr = &_sigma[0, 0]
 
         # working space for accumulated gradients
-        _acc_grad_mu = np.ascontiguousarray(np.zeros(N, dtype=DTYPE))
+        _acc_grad_mu = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
         assert _acc_grad_mu.flags['C_CONTIGUOUS']
         self.acc_grad_mu = _acc_grad_mu
         self.acc_grad_mu_ptr = &_acc_grad_mu[0]
 
-        _acc_grad_sigma = np.ascontiguousarray(np.zeros(N, dtype=DTYPE))
+        _acc_grad_sigma = np.ascontiguousarray(np.zeros(2 * N, dtype=DTYPE))
         assert _acc_grad_sigma.flags['C_CONTIGUOUS']
         self.acc_grad_sigma = _acc_grad_sigma
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
@@ -267,8 +282,8 @@ cdef class GaussianEmbedding:
          introduce to the model for retraining.
 
         If the original size of the vocabulary is N, and the new size is M
-        It adds new rows to self.mu to make it M x K
-        It increases the size of the other M x 1 dimensional arrays.
+        It adds new rows to self.mu to make it 2 * M x K
+        It increases the size of the other 2 * M x 1 dimensional arrays.
 
         N = Total size of the vocabulary
         init_params = initialization parameters to initialize new rows
@@ -279,7 +294,7 @@ cdef class GaussianEmbedding:
         cdef np.ndarray[DTYPE_t, ndim=1, mode='c'] _acc_grad_sigma
 
         LOGGER.info("New vocab size %i" % N)
-        LOGGER.info("Old vocab size %i" % self.mu.shape[0])
+        LOGGER.info("Old vocab size %i" % self.N)
         if N > self.N:
             # there are new words in the vocabulary
             # add more rows
@@ -288,60 +303,60 @@ cdef class GaussianEmbedding:
             n_words = N - self.N
             LOGGER.info("%i new words" % n_words)
 
-            # update mu with n_words more rows initialized randomly
+            # update mu with n_words
             _mu = np.ascontiguousarray(np.vstack([
-                    self.mu,
+                    self.mu[:self.N, :],
                     init_params['mu0'] * np.random.randn(
-                        n_words, self.K).astype(DTYPE)
+                        n_words, self.K).astype(DTYPE),
+                    self.mu[self.N:, :],
+                    init_params['mu0'] * np.random.randn(
+                        n_words, self.K).astype(DTYPE),
             ]))
             self.mu = _mu
-            LOGGER.info("mu updated with %i new rows" % n_words)
+            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
+            self.mu_ptr = &_mu[0, 0]
 
             # update sigma
             if self.covariance_type == SPHERICAL:
-                s = np.random.randn(n_words, 1).astype(DTYPE)
+                s = np.random.randn(2 * n_words, 1).astype(DTYPE)
             elif self.covariance_type == DIAGONAL:
-                s = np.random.randn(n_words, self.K).astype(DTYPE)
+                s = np.random.randn(2 * n_words, self.K).astype(DTYPE)
             s *= init_params['sigma_std0']
             s += init_params['sigma_mean0']
-            LOGGER.info("s created with %i new rows" % n_words)
-
+            s = np.maximum(self.sigma_min, np.minimum(s, self.sigma_max))
             _sigma = np.ascontiguousarray(np.vstack([
-                self.sigma,
-                np.maximum(self.sigma_min, np.minimum(s, self.sigma_max))
+                self.sigma[:self.N, :],
+                s[:n_words, :],
+                self.sigma[self.N:, :],
+                s[n_words:, :]
             ]))
-            LOGGER.info("sigma updated with %i new rows" % n_words)
             self.sigma = _sigma
-
-            assert _mu.flags['C_CONTIGUOUS'] and _mu.flags['OWNDATA']
             assert _sigma.flags['C_CONTIGUOUS'] and _sigma.flags['OWNDATA']
-
-            # updating pointers
-            self.mu_ptr = &_mu[0, 0]
             self.sigma_ptr = &_sigma[0, 0]
-            LOGGER.info("sigma and mu pointers updated ")
 
             # update acc_grad_mu
-            _acc_grad_mu = np.append(self.acc_grad_mu,
-                np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
-            LOGGER.info("acc_grad_mu updated with %i new rows" % n_words)
-
+            _acc_grad_mu = np.ascontiguousarray(np.hstack([
+                self.acc_grad_mu[:self.N],
+                np.zeros(n_words, dtype=DTYPE),
+                self.acc_grad_mu[self.N:],
+                np.zeros(n_words, dtype=DTYPE)
+            ]))
+            self.acc_grad_mu = _acc_grad_mu
             assert _acc_grad_mu.flags['C_CONTIGUOUS'] and \
                 _acc_grad_mu.flags['OWNDATA']
-            self.acc_grad_mu = _acc_grad_mu
             self.acc_grad_mu_ptr = &_acc_grad_mu[0]
-            LOGGER.info("acc_grad_mu pointer updated ")
 
             # update acc_grad_sigma
-            _acc_grad_sigma = np.append(self.acc_grad_sigma,
-                np.ascontiguousarray(np.zeros(n_words, dtype=DTYPE)))
-            LOGGER.info("acc_grad_sigma updated with %i new rows" % n_words)
-
+            _acc_grad_sigma = np.ascontiguousarray(np.hstack([
+                self.acc_grad_sigma[:self.N],
+                np.zeros(n_words, dtype=DTYPE),
+                self.acc_grad_sigma[self.N:],
+                np.zeros(n_words, dtype=DTYPE)
+            ]))
+            self.acc_grad_sigma = _acc_grad_sigma
             assert _acc_grad_sigma.flags['C_CONTIGUOUS'] and \
                 _acc_grad_sigma.flags['OWNDATA']
-            self.acc_grad_sigma = _acc_grad_sigma
             self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
-            LOGGER.info("acc_grad_sigma pointer updated ")
 
             self.N = N
 
@@ -362,8 +377,12 @@ cdef class GaussianEmbedding:
             training, model parameters)
 
         It has files:
-            word_mu: the word2vec file with word/id and mu vectors
-            sigma: the sigma for each vector, one per line
+            word_mu: the word2vec file with word/id and mu vectors of
+                center words.
+            mu_context: mu vectors for context embeddings, one per line
+            sigma: the sigma for each vector, one per line.  The first
+                N lines correspond to sigma for the center words and 
+                the next N lines correspond to sigma for the context words
             acc_grad_mu and acc_grad_sigma: one value per line/word with
                 accumulated gradient sums
             parameters: json file with model parameters (hyperparameters, etc)
@@ -401,6 +420,9 @@ cdef class GaussianEmbedding:
                 write_word2vec(tmp)
                 tmp.seek(0)
                 fout.add(tmp.name, arcname='word_mu')
+
+            # context mu
+            save_array(self.mu[self.N:, :], 'mu_context', fout)
 
             # sigma, accumulated gradient
             save_array(self.sigma, 'sigma', fout)
@@ -453,6 +475,7 @@ cdef class GaussianEmbedding:
         '''
         N = self.N
         K = self.K
+        N2 = 2 * N
 
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _mu
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _sigma
@@ -461,19 +484,22 @@ cdef class GaussianEmbedding:
 
         # set the data
         with open_tar(fname, 'r') as fin:
-            _mu = np.empty((N, K), dtype=DTYPE)
+            _mu = np.empty((2 * N, K), dtype=DTYPE)
             with closing(fin.extractfile('word_mu')) as f:
                 for i, line in enumerate(f):
                     ls = line.strip().split()
                     # ls[0] is the word/id, skip it.  rest are mu
                     _mu[i, :] = [float(ele) for ele in ls[1:]]
+            with closing(fin.extractfile('mu_context')) as f:
+                _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE).\
+                    reshape(N, -1).copy()
 
             with closing(fin.extractfile('sigma')) as f:
-                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, -1).copy()
+                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
             with closing(fin.extractfile('acc_grad_mu')) as f:
-                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
             with closing(fin.extractfile('acc_grad_sigma')) as f:
-                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N, ).copy()
+                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2,).copy()
 
         self.mu = _mu
         assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
@@ -546,7 +572,8 @@ cdef class GaussianEmbedding:
         else:
             t = self.mu[target, :]
 
-        scores = metric(self.mu, t.reshape(1, -1))
+        # get the neighbors to the focus words (top half of self.mu)
+        scores = metric(self.mu[:self.N, :], t.reshape(1, -1))
         top_indices = scores.argsort()[::-1][:num]
         ret = [
             {
@@ -577,6 +604,10 @@ cdef class GaussianEmbedding:
             return self.covariance_type
         elif name == 'energy_type':
             return self.energy_type
+        elif name == 'N':
+            return self.N
+        elif name == 'K':
+            return self.K
         else:
             raise AttributeError
 
@@ -667,7 +698,7 @@ cdef class GaussianEmbedding:
         '''
         cdef energy_t efunc
         if func is None:
-            return self.energy_func(i, j,
+            return self.energy_func(i, j, 2,
                 self.mu_ptr, self.sigma_ptr, self.covariance_type,
                 self.N, self.K)
         else:
@@ -677,7 +708,7 @@ cdef class GaussianEmbedding:
                 efunc = <energy_t>kl_energy
             else:
                 raise ValueError
-            return efunc(i, j,
+            return efunc(i, j, 2,
                 self.mu_ptr, self.sigma_ptr, self.covariance_type,
                 self.N, self.K)
 
@@ -702,14 +733,53 @@ cdef class GaussianEmbedding:
             dsigmai = np.zeros(self.K, dtype=DTYPE)
             dsigmaj = np.zeros(self.K, dtype=DTYPE)
 
-        self.gradient_func(i, j,
+        self.gradient_func(i, j, 2,
             &dmui[0], &dsigmai[0], &dmuj[0], &dsigmaj[0],
             self.mu_ptr, self.sigma_ptr, self.covariance_type,
             self.N, self.K)
         return (dmui, dsigmai), (dmuj, dsigmaj)
 
 
-cdef DTYPE_t kl_energy(size_t i, size_t j,
+cdef void _get_muij(size_t i, size_t j, size_t center_index,
+    size_t N, size_t K,
+    DTYPE_t* mu_ptr, DTYPE_t** mui_ptr, DTYPE_t** muj_ptr) nogil:
+    # get pointers to mu[i] and mu[j] depending on the center_index
+    # to modify the pointers we need to pass pointers to pointers
+    # and use mu_ptr[0] instead of *mu_ptr
+
+    if center_index == 0:
+        mui_ptr[0] = mu_ptr + i * K
+        muj_ptr[0] = mu_ptr + (j + N) * K
+    elif center_index == 1:
+        mui_ptr[0] = mu_ptr + (i + N) * K
+        muj_ptr[0] = mu_ptr + j * K
+    else:
+        mui_ptr[0] = mu_ptr + i * K
+        muj_ptr[0] = mu_ptr + j * K
+
+cdef void _get_sigmaij(size_t i, size_t j, size_t center_index,
+    uint32_t covariance_type, size_t N, size_t K,
+    DTYPE_t* sigma_ptr, DTYPE_t** sigmai_ptr, DTYPE_t** sigmaj_ptr) nogil:
+
+    cdef size_t fac
+
+    if covariance_type == SPHERICAL:
+        fac = 1
+    elif covariance_type == DIAGONAL:
+        fac = K
+
+    if center_index == 0:
+        sigmai_ptr[0] = sigma_ptr + i * fac
+        sigmaj_ptr[0] = sigma_ptr + (j + N) * fac
+    elif center_index == 1:
+        sigmai_ptr[0] = sigma_ptr + (i + N) * fac
+        sigmaj_ptr[0] = sigma_ptr + j * fac
+    else:
+        sigmai_ptr[0] = sigma_ptr + i * fac
+        sigmaj_ptr[0] = sigma_ptr + j * fac
+
+
+cdef DTYPE_t kl_energy(size_t i, size_t j, size_t center_index,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
@@ -732,14 +802,15 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
     cdef size_t k
 
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[j] / sigma[i]) = log det sigmaj - log det sigmai
         #   det = sigma ** K  SO
         # = K * (log(sigmaj) - log(sigmai)) = K * log(sigma j / sigmai)
-        sigma_ratio = sigma_ptr[j] / sigma_ptr[i]
+        sigma_ratio = sigmaj_ptr[0] / sigmai_ptr[0]
         det_fac = K * log(sigma_ratio)
         trace_fac = K * sigma_ratio
 
@@ -750,7 +821,7 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
 
         return -0.5 * (
             trace_fac
-            + mu_diff_sq / sigma_ptr[i]
+            + mu_diff_sq / sigmai_ptr[0]
             - K - det_fac
         )
 
@@ -765,9 +836,6 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         # = SUM (log (Sigmaj[k] / Sigmai[k]))
         # = log (prod Sigmaj[k] / Sigmai[k])
 
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
-
         trace_fac = 0.0
         mu_diff_sq = 0.0
         det_fac = 1.0
@@ -781,7 +849,7 @@ cdef DTYPE_t kl_energy(size_t i, size_t j,
         return -0.5 * (trace_fac + mu_diff_sq - K - log(det_fac))
 
 
-cdef void kl_gradient(size_t i, size_t j,
+cdef void kl_gradient(size_t i, size_t j, size_t center_index,
     DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
     DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
@@ -808,8 +876,12 @@ cdef void kl_gradient(size_t i, size_t j,
 
     cdef DTYPE_t* mui_ptr
     cdef DTYPE_t* muj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+    cdef DTYPE_t* sigmai_ptr
+    cdef DTYPE_t* sigmaj_ptr
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # compute deltaprime and assign it to dEdmu
@@ -819,7 +891,7 @@ cdef void kl_gradient(size_t i, size_t j,
         # so, use the average of the diagnonal elements of the full
         # matrix -- this amounts to the average of deltaprime ** 2
         sum_deltaprime2 = 0.0
-        one_over_si = 1.0 / sigma_ptr[i]
+        one_over_si = 1.0 / sigmai_ptr[0]
         for k in xrange(K):
             deltaprime = one_over_si * (mui_ptr[k] - muj_ptr[k])
             dEdmui_ptr[k] = -deltaprime
@@ -827,16 +899,16 @@ cdef void kl_gradient(size_t i, size_t j,
             sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
-            sigma_ptr[j] * (1.0 / sigma_ptr[i]) ** 2
+            sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
             + sum_deltaprime2 / K
-            - (1.0 / sigma_ptr[i])
+            - (1.0 / sigmai_ptr[0])
         )
-        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigma_ptr[j] - 1.0 / sigma_ptr[i])
+        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0])
 
     elif covariance_type == DIAGONAL:
         for k in xrange(K):
-            si = sigma_ptr[i * K + k]
-            sj = sigma_ptr[j * K + k]
+            si = sigmai_ptr[k]
+            sj = sigmaj_ptr[k]
 
             # compute deltaprime and assign it to dEdmu
             deltaprime = (1.0 / si) * (mui_ptr[k] - muj_ptr[k])
@@ -846,8 +918,8 @@ cdef void kl_gradient(size_t i, size_t j,
         # splitting the loop here and writting sj / si ** 2 as below
         # allows vectorization
         for k in xrange(K):
-            si = sigma_ptr[i * K + k]
-            sj = sigma_ptr[j * K + k]
+            si = sigmai_ptr[k]
+            sj = sigmaj_ptr[k]
             deltaprime = dEdmuj_ptr[k]
 
             # writing sj / si ** 2 like this allows vectorization
@@ -865,7 +937,7 @@ cdef void kl_gradient(size_t i, size_t j,
             dEdsigmaj_ptr[k] = 0.5 * (1.0 / sj - 1.0 / si)
 
 
-cdef DTYPE_t ip_energy(size_t i, size_t j,
+cdef DTYPE_t ip_energy(size_t i, size_t j, size_t center_index,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K) nogil:
     '''
@@ -889,14 +961,16 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
     cdef DTYPE_t* muj_ptr
     cdef DTYPE_t* sigmai_ptr
     cdef DTYPE_t* sigmaj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # log(det(sigma[i] + sigma[j]))
         # = log ((sigma[i] + sigma[j]) ** K)
         # = K * log(sigmai + sigmaj)
-        det_fac = K * log(sigma_ptr[i] + sigma_ptr[j])
+        det_fac = K * log(sigmai_ptr[0] + sigmaj_ptr[0])
 
         mu_diff_sq = 0.0
         for k in range(K):
@@ -905,7 +979,7 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
 
         return -0.5 * (
             det_fac +
-            mu_diff_sq / (sigma_ptr[i] + sigma_ptr[j]) +
+            mu_diff_sq / (sigmai_ptr[0] + sigmaj_ptr[0]) +
             K * log_2_pi
         )
 
@@ -914,9 +988,6 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
         # = log PROD (sigma[i] + sigma[j])
         # = SUM log (sigma[i] + sigma[j])
         # = log prod (sigma[i] + sigma[j])
-
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
 
         det_fac = 1.0
         mu_diff_sq = 0.0
@@ -930,7 +1001,7 @@ cdef DTYPE_t ip_energy(size_t i, size_t j,
         return -0.5 * (log(det_fac) + mu_diff_sq + K * log_2_pi)
 
 
-cdef void ip_gradient(size_t i, size_t j,
+cdef void ip_gradient(size_t i, size_t j, size_t center_index,
     DTYPE_t* dEdmui_ptr, DTYPE_t* dEdsigmai_ptr,
     DTYPE_t* dEdmuj_ptr, DTYPE_t* dEdsigmaj_ptr,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
@@ -950,12 +1021,14 @@ cdef void ip_gradient(size_t i, size_t j,
     cdef DTYPE_t* muj_ptr
     cdef DTYPE_t* sigmai_ptr
     cdef DTYPE_t* sigmaj_ptr
-    mui_ptr = mu_ptr + i * K
-    muj_ptr = mu_ptr + j * K
+
+    _get_muij(i, j, center_index, N, K, mu_ptr, &mui_ptr, &muj_ptr)
+    _get_sigmaij(i, j, center_index, covariance_type, N, K,
+        sigma_ptr, &sigmai_ptr, &sigmaj_ptr)
 
     if covariance_type == SPHERICAL:
         # compute delta and assign it to dEdmu
-        sigmai_plus_sigmaj_inv = 1.0 / (sigma_ptr[i] + sigma_ptr[j])
+        sigmai_plus_sigmaj_inv = 1.0 / (sigmai_ptr[0] + sigmaj_ptr[0])
         # we'll sum up delta ** 2 too
         sum_delta2 = 0.0
         for k in xrange(K):
@@ -971,9 +1044,6 @@ cdef void ip_gradient(size_t i, size_t j,
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 
     elif covariance_type == DIAGONAL:
-
-        sigmai_ptr = sigma_ptr + i * K
-        sigmaj_ptr = sigma_ptr + j * K
 
         for k in xrange(K):
             sigmai_plus_sigmaj = sigmai_ptr[k] + sigmaj_ptr[k]
@@ -1005,12 +1075,11 @@ cdef void train_batch(
     '''
     Update the model on a batch of data
 
-    pairs = numpy array of positive negative pair = (Npairs, 4)
-        row[0:2] is the positive i, j indices and row[2:4] are the
-        negative indices
+    pairs = numpy array of positive / negative examples
+        (see documentation of text_to_pairs for a detailed description)
     Npairs = number of training examples in this set
     '''
-    cdef size_t k, posi, posj, negi, negj, pos_neg, i, j
+    cdef size_t k, posi, posj, negi, negj, pos_neg, i, j, center_index
     cdef DTYPE_t loss
     cdef DTYPE_t pos_energy, neg_energy
     cdef DTYPE_t fac
@@ -1019,7 +1088,7 @@ cdef void train_batch(
     # make one vector of length 4 * K, then partition it up for
     # the four different types of gradients
     # in the spherical case dsigmai, j need to be size 1, but size K
-    # in diagnoanl case.  To save code complexity we'll always allocate as
+    # in diagonal case.  To save code complexity we'll always allocate as
     # size K since K is small
     cdef DTYPE_t* work = <DTYPE_t*>malloc(K * 4 * sizeof(DTYPE_t))
     cdef DTYPE_t* dmui = work
@@ -1031,14 +1100,15 @@ cdef void train_batch(
 
         # compute the loss
         # loss = max(0.0, Closs - energy(pos) + energy(neg))
-        posi = pairs[k * 4]
-        posj = pairs[k * 4 + 1]
-        negi = pairs[k * 4 + 2]
-        negj = pairs[k * 4 + 3]
+        posi = pairs[k * 5]
+        posj = pairs[k * 5 + 1]
+        negi = pairs[k * 5 + 2]
+        negj = pairs[k * 5 + 3]
+        center_index = pairs[k * 5 + 4]
 
-        pos_energy = energy_func(posi, posj,
+        pos_energy = energy_func(posi, posj, center_index,
             mu_ptr, sigma_ptr, covariance_type, N, K)
-        neg_energy = energy_func(negi, negj,
+        neg_energy = energy_func(negi, negj, center_index,
             mu_ptr, sigma_ptr, covariance_type, N, K)
         loss = Closs - pos_energy + neg_energy
 
@@ -1051,28 +1121,38 @@ cdef void train_batch(
         # except the sign of update
         for pos_neg in range(2):
             # this is a trick to get the right indices
-            i = pairs[k * 4 + pos_neg * 2]
-            j = pairs[k * 4 + pos_neg * 2 + 1]
+            i = pairs[k * 5 + pos_neg * 2]
+            j = pairs[k * 5 + pos_neg * 2 + 1]
             if pos_neg == 0:
                 fac = -1.0
             else:
                 fac = 1.0
 
             # compute the gradients
-            gradient_func(i, j,
+            gradient_func(i, j, center_index,
                 dmui, dsigmai, dmuj, dsigmaj,
                 mu_ptr, sigma_ptr, covariance_type, N, K)
 
-            _accumulate_update(i, dmui, dsigmai,
+            # accumulate the gradients for adagrad and update
+            # parameters. center_index determines whether we update
+            # the context parameters or center word parameters.
+            # can handle both cases by appropriately modifying
+            # the i, j passed to _accumulate_update.
+            # if center_index == 0 then pass i and j + N
+            # if center_index == 1 then pass i + N and j
+            # so i + center_index * N and
+            #    j + (1 - center_index) * N handles both cases
+            _accumulate_update(i + center_index * N, dmui, dsigmai,
                 mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
-            _accumulate_update(j, dmuj, dsigmaj,
+            _accumulate_update(j + (1 - center_index) * N, dmuj, dsigmaj,
                 mu_ptr, sigma_ptr, covariance_type,
                 fac, eta, C, m, M, acc_grad_mu, acc_grad_sigma,
                 N, K)
 
     free(work)
+
 
 cdef void _accumulate_update(
     size_t k, DTYPE_t* dmu, DTYPE_t* dsigma,
@@ -1089,10 +1169,15 @@ cdef void _accumulate_update(
     cdef DTYPE_t l2_mu
     cdef DTYPE_t sig
 
+    cdef DTYPE_t max_grad = 10.0
+
     # update for mu
     # first update the accumulated gradient for adagrad
     sum_dmu2 = 0.0
     for i in range(K):
+        # clip gradients
+        dmu[i] = (max_grad if dmu[i] > max_grad else dmu[i])
+        dmu[i] = (-max_grad if dmu[i] < -max_grad else dmu[i])
         sum_dmu2 += dmu[i] * dmu[i]
     sum_dmu2 /= K
     acc_grad_mu[k] += sum_dmu2
@@ -1115,6 +1200,8 @@ cdef void _accumulate_update(
 
     # now for Sigma
     if covariance_type == SPHERICAL:
+        dsigma[0] = (max_grad if dsigma[0] > max_grad else dsigma[0])
+        dsigma[0] = (-max_grad if dsigma[0] < -max_grad else dsigma[0])
         acc_grad_sigma[k] += dsigma[0] * dsigma[0]
         local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
         sigma_ptr[k] -= fac * local_eta * dsigma[0]
@@ -1126,6 +1213,8 @@ cdef void _accumulate_update(
     elif covariance_type == DIAGONAL:
         sum_dsigma = 0.0
         for i in xrange(K):
+            dsigma[i] = (max_grad if dsigma[i] > max_grad else dsigma[i])
+            dsigma[i] = (-max_grad if dsigma[i] < -max_grad else dsigma[i])
             sum_dsigma += dsigma[i] * dsigma[i]
         sum_dsigma /= K
         acc_grad_sigma[k] += sum_dsigma
@@ -1146,6 +1235,16 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
     uint32_t nsamples_per_word=1):
     '''
     Take a chunk of text and turn it into a array of pairs for training.
+
+    The return array pairs is size (npairs, 5).
+    Each row is one training example.  The first two entries are the
+    token ids for the positive example and the second two entries
+    are the token ids for the negative example.  The final entry
+    is either 0 or 1 with encoding whether the left (0) or right (1)
+    id is the center word.  For example, this row:
+        [3, 122, 3, 910, 0]
+    means: word id's 3 and 122 occur in a context window, word ids 3 and 910
+    are the negative sample and the 0 signals word 3 is the center word.
 
     text is a list of text documents / sentences.
 
@@ -1171,7 +1270,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
 
     # allocate pairs and draw random numbers
     cdef np.ndarray[uint32_t, ndim=2, mode='c'] pairs = np.empty(
-        (npairs, 4), dtype=np.uint32)
+        (npairs, 5), dtype=np.uint32)
     cdef np.ndarray[uint32_t] randids = random_gen(npairs)
     cdef np.ndarray[uint32_t, ndim=1, mode='c'] cdoc
 
@@ -1198,6 +1297,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     pairs[next_pair, 1] = cdoc[j]
                     pairs[next_pair, 2] = cdoc[i]
                     pairs[next_pair, 3] = randids[next_pair]
+                    pairs[next_pair, 4] = 0
                     next_pair += 1
 
                     # now sample i
@@ -1205,6 +1305,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     pairs[next_pair, 1] = cdoc[j]
                     pairs[next_pair, 2] = randids[next_pair]
                     pairs[next_pair, 3] = cdoc[j]
+                    pairs[next_pair, 4] = 1
                     next_pair += 1
 
     return np.ascontiguousarray(pairs[:next_pair, :])
