@@ -66,7 +66,6 @@ class TestSaveLoad(unittest.TestCase):
         self.assertTrue(np.allclose(emb.mu, embed.mu))
         self.assertTrue(np.allclose(emb.sigma, embed.sigma))
 
-
 class TestKLEnergy(unittest.TestCase):
     def test_kl_energy_spherical(self):
         embed = sample_embed(energy_type='KL', covariance_type='spherical')
@@ -282,6 +281,31 @@ class TestGaussianEmbedding(unittest.TestCase):
         embed.train(iter_pairs(), n_workers=4)
 
         self._check_results(embed)
+
+    def test_eta_single(self):
+        embed = GaussianEmbedding(10, 5, eta=0.55)
+        expected = {
+            'mu': 0.55,
+            'mu_min': 0.0,
+            'sigma': 0.55,
+            'sigma_min': 0.0
+        }
+        actual = embed.eta
+        for k, v in expected.items():
+            self.assertAlmostEqual(actual[k], v)
+
+    def test_eta_multiple(self):
+        expected = {
+            'mu': 0.1,
+            'mu_min': 0.001,
+            'sigma': 0.05,
+            'sigma_min': 0.000005
+        }
+        embed = GaussianEmbedding(10, 5, eta=expected)
+        actual = embed.eta
+        for k, v in expected.items():
+            self.assertAlmostEqual(actual[k], v)
+
 
 class TestTexttoPairs(unittest.TestCase):
     def test_text_to_pairs(self):

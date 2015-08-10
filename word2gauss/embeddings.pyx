@@ -102,6 +102,10 @@ ctypedef void (*gradient_t)(size_t, size_t, size_t,
     DTYPE_t*, DTYPE_t*, DTYPE_t*, DTYPE_t*,
     DTYPE_t*, DTYPE_t*, uint32_t, size_t, size_t) nogil
 
+# learning rates.  We'll store global learning rates for mu and sigma,
+# as well as minimum rates for each
+cdef struct LearningRates:
+    DTYPE_t mu, sigma, mu_min, sigma_min
 
 cdef class GaussianEmbedding:
     '''
@@ -151,8 +155,9 @@ cdef class GaussianEmbedding:
     # min and max L2 norm of Sigma (= max/min entries on the diagonal)
     cdef DTYPE_t sigma_min, sigma_max
 
-    # global learning rate
-    cdef DTYPE_t eta
+    # learning rates
+    cdef LearningRates eta
+
     # the Closs in max-margin function
     cdef DTYPE_t Closs
 
@@ -189,7 +194,12 @@ cdef class GaussianEmbedding:
                 mean=sigma_mean0, std=sigma_std0
             NOTE: these are ignored if mu/sigma is explicitly specified
         }
-        eta = global learning rate
+        eta = learning rates.  Two options:
+            * pass a single float which gives the global learning rate
+            for both mu and sigma with no minimum
+            * pass dict with keys mu and sigma (global learning rate
+                for mu / sigma) and mu_min, sigma_min (minimum local
+                learning rate for each)
         Closs = regularization parameter in max-margin loss
             loss = max(0.0, Closs - energy(pos) + energy(neg)
         if mu/sigma are not None then they specify the initial values
@@ -222,8 +232,20 @@ cdef class GaussianEmbedding:
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.mu_max = mu_max
-        self.eta = eta
         self.Closs = Closs
+
+        if isinstance(eta, dict):
+            # NOTE: cython automatically converts from struct to dict
+            self.eta = eta
+            #self.eta.mu = eta['mu']
+            #self.eta.sigma = eta['sigma']
+            #self.eta.mu_min = eta['mu_min']
+            #self.eta.sigma_min = eta['sigma_min']
+        else:
+            self.eta.mu = eta
+            self.eta.sigma = eta
+            self.eta.mu_min = 0.0
+            self.eta.sigma_min = 0.0
 
         # Initialize parameters
         np.random.seed(5)
@@ -657,6 +679,8 @@ cdef class GaussianEmbedding:
             return self.N
         elif name == 'K':
             return self.K
+        elif name == 'eta':
+            return self.eta
         else:
             raise AttributeError
 
@@ -731,7 +755,7 @@ cdef class GaussianEmbedding:
                 self.energy_func, self.gradient_func,
                 self.mu_ptr, self.sigma_ptr, self.covariance_type,
                 self.N, self.K,
-                self.eta, self.Closs,
+                &self.eta, self.Closs,
                 self.mu_max, self.sigma_min, self.sigma_max,
                 self.acc_grad_mu_ptr, self.acc_grad_sigma_ptr
             )
@@ -1118,7 +1142,7 @@ cdef void train_batch(
     energy_t energy_func, gradient_t gradient_func,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
     size_t N, size_t K,
-    DTYPE_t eta, DTYPE_t Closs, DTYPE_t C, DTYPE_t m, DTYPE_t M,
+    LearningRates* eta, DTYPE_t Closs, DTYPE_t C, DTYPE_t m, DTYPE_t M,
     DTYPE_t* acc_grad_mu, DTYPE_t* acc_grad_sigma
     ) nogil:
     '''
@@ -1206,7 +1230,7 @@ cdef void train_batch(
 cdef void _accumulate_update(
     size_t k, DTYPE_t* dmu, DTYPE_t* dsigma,
     DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
-    DTYPE_t fac, DTYPE_t eta, DTYPE_t C, DTYPE_t m, DTYPE_t M,
+    DTYPE_t fac, LearningRates* eta, DTYPE_t C, DTYPE_t m, DTYPE_t M,
     DTYPE_t* acc_grad_mu, DTYPE_t* acc_grad_sigma,
     size_t N, size_t K
     ) nogil:
@@ -1228,7 +1252,8 @@ cdef void _accumulate_update(
         # update the accumulated gradient for adagrad
         acc_grad_mu[k * K + i] += dmu[i] * dmu[i]
         # now get local learning rate for this word
-        local_eta = eta / (sqrt(acc_grad_mu[k * K + i]) + 1.0)
+        local_eta = eta.mu / (sqrt(acc_grad_mu[k * K + i]) + 1.0)
+        local_eta = (eta.mu_min if local_eta < eta.mu_min else local_eta)
         # finally update mu
         mu_ptr[k * K + i] -= fac * local_eta * dmu[i]
         # accumulate L2 norm of mu for regularization
@@ -1246,7 +1271,8 @@ cdef void _accumulate_update(
         dsigma[0] = (max_grad if dsigma[0] > max_grad else dsigma[0])
         dsigma[0] = (-max_grad if dsigma[0] < -max_grad else dsigma[0])
         acc_grad_sigma[k] += dsigma[0] * dsigma[0]
-        local_eta = eta / (sqrt(acc_grad_sigma[k]) + 1.0)
+        local_eta = eta.sigma / (sqrt(acc_grad_sigma[k]) + 1.0)
+        local_eta = (eta.sigma_min if local_eta < eta.sigma_min else local_eta)
         sigma_ptr[k] -= fac * local_eta * dsigma[0]
         if sigma_ptr[k] > M:
             sigma_ptr[k] = M
@@ -1261,7 +1287,9 @@ cdef void _accumulate_update(
             # update the accumulated gradient for adagrad
             acc_grad_sigma[k * K + i] += dsigma[i] * dsigma[i]
             # now get local learning rate for this word
-            local_eta = eta / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
+            local_eta = eta.sigma / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
+            local_eta = (eta.sigma_min
+                if local_eta < eta.sigma_min else local_eta)
             # finally update sigma
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
             # bound sigma between m and M
