@@ -47,6 +47,26 @@ def sample_embed(energy_type='KL', covariance_type='spherical'):
         mu=mu, sigma=sigma
     )
 
+class TestSaveLoad(unittest.TestCase):
+    def tearDown(self):
+        import os
+        os.remove(self.tmpname)
+
+    def test_save_load(self):
+        import tempfile
+
+        (fid, self.tmpname) = tempfile.mkstemp()
+
+        embed = sample_embed()
+        embed.save(self.tmpname, full=True)
+
+        # now load and check
+        emb = embed.load(self.tmpname)
+
+        self.assertTrue(np.allclose(emb.mu, embed.mu))
+        self.assertTrue(np.allclose(emb.sigma, embed.sigma))
+
+
 class TestKLEnergy(unittest.TestCase):
     def test_kl_energy_spherical(self):
         embed = sample_embed(energy_type='KL', covariance_type='spherical')
