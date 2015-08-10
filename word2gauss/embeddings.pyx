@@ -237,10 +237,6 @@ cdef class GaussianEmbedding:
         if isinstance(eta, dict):
             # NOTE: cython automatically converts from struct to dict
             self.eta = eta
-            #self.eta.mu = eta['mu']
-            #self.eta.sigma = eta['sigma']
-            #self.eta.mu_min = eta['mu_min']
-            #self.eta.sigma_min = eta['sigma_min']
         else:
             self.eta.mu = eta
             self.eta.sigma = eta
