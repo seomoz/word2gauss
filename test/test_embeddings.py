@@ -1,11 +1,16 @@
 
 import unittest
-
 import numpy as np
-
+import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
+import vocab as v
 
 DTYPE = np.float32
+
+def sample_vocab():
+    ngrams = [{'new':0, 'york':1, 'city':2}]
+    vocab = v.vocab.Vocabulary(ngrams)
+    return vocab
 
 def sample_embed(energy_type='KL', covariance_type='spherical'):
     mu = np.array([
@@ -123,7 +128,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
             # the negative sample
             neg = (i, np.random.randint(0, 10))
-            
+
             # randomly sample whether left or right is context word
             context_index = np.random.randint(0, 2)
 
@@ -146,7 +151,7 @@ class TestGaussianEmbedding(unittest.TestCase):
     def test_model_update(self):
         for covariance_type, sigma_shape1 in [
                 ('spherical', 1), ('diagonal', 2)]:
-            embed = sample_embed(covariance_type=covariance_type)
+            embed = sample_embed(energy_type='IP', covariance_type=covariance_type)
             embed.update(5)
 
             self.assertEquals(embed.mu.shape, (10, 2))
@@ -172,7 +177,6 @@ class TestGaussianEmbedding(unittest.TestCase):
 
     def test_train_batch_KL_diagonal(self):
         training_data = self._training_data()
-
         embed = GaussianEmbedding(10, 5,
             covariance_type='diagonal',
             energy_type='KL',
@@ -185,6 +189,33 @@ class TestGaussianEmbedding(unittest.TestCase):
             embed.train_batch(training_data[k:(k+100)])
 
         self._check_results(embed)
+
+
+    def test_phrases_to_vector1(self):
+        self.embed = sample_embed(energy_type='IP',
+            covariance_type='spherical')
+        vocab = sample_vocab()
+        target = [["new"], ["york"]]
+        res = np.array([-1. , 1.25])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
+
+    def test_phrases_to_vector2(self):
+        self.embed = sample_embed(energy_type='IP',
+            covariance_type='spherical')
+        vocab = sample_vocab()
+        target = [["new"], []]
+        res = np.array([0. , 0])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
+
+    def test_phrases_to_vector3(self):
+        self.embed = sample_embed(energy_type='IP', covariance_type='spherical')
+        vocab = sample_vocab()
+        target = [["new"], [""]]
+        res = np.array([0. , 0])
+        vec = self.embed.phrases_to_vector(target, vocab=vocab)
+        test.assert_array_equal(vec, res)
 
     def test_train_batch_IP_spherical(self):
         training_data = self._training_data()
