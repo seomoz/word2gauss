@@ -13,7 +13,7 @@ def sample_vocab():
     vocab = Vocabulary(ngrams)
     return vocab
 
-def sample_embed(energy_type='KL', covariance_type='spherical'):
+def sample_embed(energy_type='KL', covariance_type='spherical', eta=0.1):
     mu = np.array([
         [0.0, 0.0],
         [1.0, -1.25],
@@ -44,7 +44,7 @@ def sample_embed(energy_type='KL', covariance_type='spherical'):
     return GaussianEmbedding(3, size=2,
         covariance_type=covariance_type,
         energy_type=energy_type,
-        mu=mu, sigma=sigma
+        mu=mu, sigma=sigma, eta=eta
     )
 
 class TestSaveLoad(unittest.TestCase):
@@ -57,7 +57,16 @@ class TestSaveLoad(unittest.TestCase):
 
         (fid, self.tmpname) = tempfile.mkstemp()
 
-        embed = sample_embed()
+        eta = {'mu':0.1, 'sigma':0.5, 'mu_min': 0.001, 'sigma_min': 0.0005}
+        covariance_type = 'diagonal'
+        energy_type = 'KL'
+
+        embed = sample_embed(
+            covariance_type=covariance_type,
+            energy_type=energy_type,
+            eta=eta
+        )
+
         embed.save(self.tmpname, full=True)
 
         # now load and check
@@ -65,6 +74,10 @@ class TestSaveLoad(unittest.TestCase):
 
         self.assertTrue(np.allclose(emb.mu, embed.mu))
         self.assertTrue(np.allclose(emb.sigma, embed.sigma))
+        self.assertEqual(emb.covariance_type, embed.covariance_type)
+        self.assertEqual(emb.energy_type, embed.energy_type)
+        for k, v in emb.eta.items():
+            self.assertAlmostEqual(embed.eta[k], v)
 
 class TestKLEnergy(unittest.TestCase):
     def test_kl_energy_spherical(self):
