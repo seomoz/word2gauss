@@ -1233,7 +1233,7 @@ cdef void _accumulate_update(
 
     # accumulate the gradients and update
     cdef size_t i
-    cdef DTYPE_t local_eta
+    cdef DTYPE_t local_eta, global_eta, eta_min
     cdef DTYPE_t l2_mu
     cdef DTYPE_t sig
 
@@ -1241,6 +1241,8 @@ cdef void _accumulate_update(
 
     # update for mu
     l2_mu = 0.0
+    global_eta = eta.mu   # pre-assigning these allows gcc autovectorization
+    eta_min = eta.mu_min
     for i in range(K):
         # clip gradients
         dmu[i] = (max_grad if dmu[i] > max_grad else dmu[i])
@@ -1248,8 +1250,8 @@ cdef void _accumulate_update(
         # update the accumulated gradient for adagrad
         acc_grad_mu[k * K + i] += dmu[i] * dmu[i]
         # now get local learning rate for this word
-        local_eta = eta.mu / (sqrt(acc_grad_mu[k * K + i]) + 1.0)
-        local_eta = (eta.mu_min if local_eta < eta.mu_min else local_eta)
+        local_eta = global_eta / (sqrt(acc_grad_mu[k * K + i]) + 1.0)
+        local_eta = (eta_min if local_eta < eta_min else local_eta)
         # finally update mu
         mu_ptr[k * K + i] -= fac * local_eta * dmu[i]
         # accumulate L2 norm of mu for regularization
@@ -1276,6 +1278,8 @@ cdef void _accumulate_update(
             sigma_ptr[k] = m
 
     elif covariance_type == DIAGONAL:
+        global_eta = eta.sigma
+        eta_min = eta.sigma_min
         for i in xrange(K):
             # clip gradients
             dsigma[i] = (max_grad if dsigma[i] > max_grad else dsigma[i])
@@ -1283,9 +1287,8 @@ cdef void _accumulate_update(
             # update the accumulated gradient for adagrad
             acc_grad_sigma[k * K + i] += dsigma[i] * dsigma[i]
             # now get local learning rate for this word
-            local_eta = eta.sigma / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
-            local_eta = (eta.sigma_min
-                if local_eta < eta.sigma_min else local_eta)
+            local_eta = global_eta / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
+            local_eta = (global_eta if local_eta < eta_min else local_eta)
             # finally update sigma
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
             # bound sigma between m and M
