@@ -3,13 +3,14 @@ import unittest
 import numpy as np
 import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
-import vocab as v
+#import vocab as v
+from vocab import Vocabulary
 
 DTYPE = np.float32
 
 def sample_vocab():
     ngrams = [{'new':0, 'york':1, 'city':2}]
-    vocab = v.vocab.Vocabulary(ngrams)
+    vocab = Vocabulary(ngrams)
     return vocab
 
 def sample_embed(energy_type='KL', covariance_type='spherical'):
@@ -151,7 +152,7 @@ class TestGaussianEmbedding(unittest.TestCase):
     def test_model_update(self):
         for covariance_type, sigma_shape1 in [
                 ('spherical', 1), ('diagonal', 2)]:
-            embed = sample_embed(energy_type='IP', covariance_type=covariance_type)
+            embed = sample_embed(covariance_type=covariance_type)
             embed.update(5)
 
             self.assertEquals(embed.mu.shape, (10, 2))
