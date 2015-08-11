@@ -381,7 +381,7 @@ cdef class GaussianEmbedding:
                 center words.
             mu_context: mu vectors for context embeddings, one per line
             sigma: the sigma for each vector, one per line.  The first
-                N lines correspond to sigma for the center words and 
+                N lines correspond to sigma for the center words and
                 the next N lines correspond to sigma for the context words
             acc_grad_mu and acc_grad_sigma: one value per line/word with
                 accumulated gradient sums
@@ -524,9 +524,10 @@ cdef class GaussianEmbedding:
         self.acc_grad_sigma_ptr = &_acc_grad_sigma[0]
 
 
-    def get_phrases_vector(self, phrases, vocab=None):
-        if vocab is None:
-            raise Exception("Cannot convert phrase to a vector without a vocabulary")
+    def get_phrases_vector(self, phrases, vocab):
+        ''' Input is a list of phrases and the output is a vector
+        representation of those phrases
+        '''
         vec = np.zeros(self.K)
         if phrases == [''] or phrases == []:
             return vec
@@ -542,12 +543,10 @@ cdef class GaussianEmbedding:
             vec /= len(phrases)
             return vec
 
-    def phrases_to_vector(self, target, vocab=None):
+    def phrases_to_vector(self, target, vocab):
         ''' Input is a list of lists, where target[0] is the list of positive
         phrases and target[1] is the optional list of negative phrases
         '''
-        if vocab is None:
-            raise Exception("Cannot convert phrase to a vector without a vocabulary")
         positive_vec = self.get_phrases_vector(target[0], vocab=vocab)
         negative_vec = self.get_phrases_vector(target[1], vocab=vocab)
         return (positive_vec-negative_vec)
@@ -569,6 +568,7 @@ cdef class GaussianEmbedding:
                 word_id
             * if target = [(tuple of strings), (tuple of strings)] then
                 it is interpreted as positive and negative words
+            * if target = [numpy array], then it is interpreted as a vector
             ** NOTE: if using tuples and only have one entry in the list,
                 then need to use the trailing comma syntax, e.g.
                 [('king', 'woman'), ('man', )] not [('king', 'woman'), ('man')]
@@ -602,9 +602,6 @@ cdef class GaussianEmbedding:
                         # input is ID
                         word_id = word_or_id
                         mu_val = self.mu[word_id, :]
-                    # else:
-                    #     # input is a vector
-                    #     mu_val = word_or_id
 
                     t += fac * mu_val
         elif "numpy" in str(type(target)):
