@@ -1288,7 +1288,7 @@ cdef void _accumulate_update(
             acc_grad_sigma[k * K + i] += dsigma[i] * dsigma[i]
             # now get local learning rate for this word
             local_eta = global_eta / (sqrt(acc_grad_sigma[k * K + i]) + 1.0)
-            local_eta = (global_eta if local_eta < eta_min else local_eta)
+            local_eta = (eta_min if local_eta < eta_min else local_eta)
             # finally update sigma
             sigma_ptr[k * K + i] -= fac * local_eta * dsigma[i]
             # bound sigma between m and M
