@@ -915,6 +915,12 @@ cdef DTYPE_t kl_energy(size_t i, size_t j, size_t center_index,
             mu_diff_sq += mu_diff * mu_diff / sigmai_ptr[k]
             det_fac *= sigma_ratio
 
+        # bound det_fac
+        if det_fac < 1.0e-8:
+            det_fac = 1.0e-8
+        elif det_fac > 1.0e8:
+            det_fac = 1.0e8
+
         return -0.5 * (trace_fac + mu_diff_sq - K - log(det_fac))
 
 
@@ -1066,6 +1072,11 @@ cdef DTYPE_t ip_energy(size_t i, size_t j, size_t center_index,
             det_fac *= sigmai_plus_sigmaj
             mu_diff = mui_ptr[k] - muj_ptr[k]
             mu_diff_sq += mu_diff * mu_diff / sigmai_plus_sigmaj
+
+        if det_fac < 1.0e-8:
+            det_fac = 1.0e-8
+        elif det_fac > 1.0e8:
+            det_fac = 1.0e8
 
         return -0.5 * (log(det_fac) + mu_diff_sq + K * log_2_pi)
 
