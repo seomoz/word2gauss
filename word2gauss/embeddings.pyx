@@ -50,8 +50,7 @@ import time
 import json
 import numpy as np
 
-from tarfile import open as open_tar
-from contextlib import closing
+from zipfile import ZipFile, ZIP_DEFLATED
 
 from .utils import cosine
 
@@ -400,7 +399,7 @@ cdef class GaussianEmbedding:
         This class doesn't have knowledge of id -> word mapping, so
         it can be passed in as a callable vocab(id) return the word string
 
-        if full=True, then writes out the full model.  It is a tar.gz
+        if full=True, then writes out the full model.  It is a zip
         file with the word vectors and Sigma files, in addition
         to files for the other state (accumulated gradient for
             training, model parameters)
@@ -433,7 +432,7 @@ cdef class GaussianEmbedding:
             with NamedTemporaryFile() as tmp:
                 np.savetxt(tmp, a, fmt='%s')
                 tmp.seek(0)
-                fout.add(tmp.name, arcname=name)
+                fout.write(tmp.name, arcname=name)
 
         if not full:
             with GzipFile(fname, 'w') as fout:
@@ -443,12 +442,13 @@ cdef class GaussianEmbedding:
         # otherwise write the full file
         # easiest way to manage is to write out to temp files then
         # add to archive
-        with open_tar(fname, 'w:gz') as fout:
+        with ZipFile(fname, 'w', compression=ZIP_DEFLATED, allowZip64=True) as \
+                fout:
             # word2vec file
             with NamedTemporaryFile() as tmp:
                 write_word2vec(tmp)
                 tmp.seek(0)
-                fout.add(tmp.name, arcname='word_mu')
+                fout.write(tmp.name, arcname='word_mu')
 
             # context mu
             save_array(self.mu[self.N:, :], 'mu_context', fout)
@@ -473,18 +473,19 @@ cdef class GaussianEmbedding:
             with NamedTemporaryFile() as tmp:
                 tmp.write(json.dumps(params))
                 tmp.seek(0)
-                fout.add(tmp.name, arcname='parameters')
+                fout.write(tmp.name, arcname='parameters')
 
     @classmethod
     def load(cls, fname):
         '''
-        Load the model from the saved tar ball (from a previous
+        Load the model from the saved zip file (from a previous
             call to save with full=True)
         '''
         # read in the parameters, construct the class, then read
         # data and store it in class
-        with open_tar(fname, 'r') as fin:
-            with closing(fin.extractfile('parameters')) as f:
+        #with open_tar(fname, 'r') as fin:
+        with ZipFile(fname, 'r') as fin:
+            with fin.open('parameters') as f:
                 params = json.loads(f.read())
 
             ret = cls(params['N'], size=params['K'],
@@ -512,22 +513,21 @@ cdef class GaussianEmbedding:
         cdef np.ndarray[DTYPE_t, ndim=2, mode='c'] _acc_grad_sigma
 
         # set the data
-        with open_tar(fname, 'r') as fin:
+        with ZipFile(fname, 'r') as fin:
             _mu = np.empty((2 * N, K), dtype=DTYPE)
-            with closing(fin.extractfile('word_mu')) as f:
+            with fin.open('word_mu') as f:
                 for i, line in enumerate(f):
                     ls = line.strip().split()
                     # ls[0] is the word/id, skip it.  rest are mu
                     _mu[i, :] = [float(ele) for ele in ls[1:]]
-            with closing(fin.extractfile('mu_context')) as f:
+            with fin.open('mu_context') as f:
                 _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE).\
                     reshape(N, -1).copy()
-
-            with closing(fin.extractfile('sigma')) as f:
+            with fin.open('sigma') as f:
                 _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
-            with closing(fin.extractfile('acc_grad_mu')) as f:
+            with fin.open('acc_grad_mu') as f:
                 _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2, K).copy()
-            with closing(fin.extractfile('acc_grad_sigma')) as f:
+            with fin.open('acc_grad_sigma') as f:
                 _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).\
                     reshape(N2, -1).copy()
 
@@ -1390,4 +1390,3 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
                     next_pair += 1
 
     return np.ascontiguousarray(pairs[:next_pair, :])
-

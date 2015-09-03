@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
-#import vocab as v
+
 from vocab import Vocabulary
 
 DTYPE = np.float32
@@ -47,6 +47,7 @@ def sample_embed(energy_type='KL', covariance_type='spherical', eta=0.1):
         mu=mu, sigma=sigma, eta=eta
     )
 
+
 class TestSaveLoad(unittest.TestCase):
     def tearDown(self):
         import os
@@ -78,6 +79,7 @@ class TestSaveLoad(unittest.TestCase):
         self.assertEqual(emb.energy_type, embed.energy_type)
         for k, v in emb.eta.items():
             self.assertAlmostEqual(embed.eta[k], v)
+
 
 class TestKLEnergy(unittest.TestCase):
     def test_kl_energy_spherical(self):
