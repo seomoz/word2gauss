@@ -53,7 +53,7 @@ class TestSaveLoad(unittest.TestCase):
         import os
         os.remove(self.tmpname)
 
-    def test_save_load(self):
+    def _save_load(self, training_mode):
         import tempfile
 
         (fid, self.tmpname) = tempfile.mkstemp()
@@ -71,7 +71,7 @@ class TestSaveLoad(unittest.TestCase):
         embed.save(self.tmpname, full=True)
 
         # now load and check
-        emb = embed.load(self.tmpname)
+        emb = embed.load(self.tmpname, training_mode=training_mode)
 
         self.assertTrue(np.allclose(emb.mu, embed.mu))
         self.assertTrue(np.allclose(emb.sigma, embed.sigma))
@@ -79,6 +79,12 @@ class TestSaveLoad(unittest.TestCase):
         self.assertEqual(emb.energy_type, embed.energy_type)
         for k, v in emb.eta.items():
             self.assertAlmostEqual(embed.eta[k], v)
+
+    def test_save_load_full(self):
+        self._save_load(True)
+
+    def test_save_load_query(self):
+        self._save_load(False)
 
 
 class TestKLEnergy(unittest.TestCase):

@@ -476,10 +476,12 @@ cdef class GaussianEmbedding:
                 fout.write(tmp.name, arcname='parameters')
 
     @classmethod
-    def load(cls, fname):
+    def load(cls, fname, training_mode=True):
         '''
         Load the model from the saved zip file (from a previous
             call to save with full=True)
+        training_mode: if True (default), load all matrices. Otherwise, just
+        load mu and sigma, which are the only matrices needed at query time.
         '''
         # read in the parameters, construct the class, then read
         # data and store it in class
@@ -495,11 +497,11 @@ cdef class GaussianEmbedding:
                 energy_type=params['energy_type'],
                 eta=params['eta'], Closs=params['Closs'])
 
-        ret._data_from_file(fname)
+        ret._data_from_file(fname, training_mode)
 
         return ret
 
-    def _data_from_file(self, fname):
+    def _data_from_file(self, fname, training_mode):
         '''
         Set mu, sigma, acc_grad* from the saved file
         '''
@@ -525,11 +527,13 @@ cdef class GaussianEmbedding:
                     reshape(N, -1).copy()
             with fin.open('sigma') as f:
                 _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
-            with fin.open('acc_grad_mu') as f:
-                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2, K).copy()
-            with fin.open('acc_grad_sigma') as f:
-                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).\
-                    reshape(N2, -1).copy()
+            if training_mode:
+                with fin.open('acc_grad_mu') as f:
+                    _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).\
+                        reshape(N2, K).copy()
+                with fin.open('acc_grad_sigma') as f:
+                    _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE).\
+                        reshape(N2, -1).copy()
 
         self.mu = _mu
         assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
@@ -539,19 +543,20 @@ cdef class GaussianEmbedding:
         assert self.sigma.flags['C_CONTIGUOUS'] and self.sigma.flags['OWNDATA']
         self.sigma_ptr = &_sigma[0, 0]
 
-        self.acc_grad_mu = _acc_grad_mu
-        assert (
-            self.acc_grad_mu.flags['C_CONTIGUOUS'] and
-            self.acc_grad_mu.flags['OWNDATA']
-        )
-        self.acc_grad_mu_ptr = &_acc_grad_mu[0, 0]
+        if training_mode:
+            self.acc_grad_mu = _acc_grad_mu
+            assert (
+                self.acc_grad_mu.flags['C_CONTIGUOUS'] and
+                self.acc_grad_mu.flags['OWNDATA']
+            )
+            self.acc_grad_mu_ptr = &_acc_grad_mu[0, 0]
 
-        self.acc_grad_sigma = _acc_grad_sigma
-        assert (
-            self.acc_grad_sigma.flags['C_CONTIGUOUS'] and
-            self.acc_grad_sigma.flags['OWNDATA']
-        )
-        self.acc_grad_sigma_ptr = &_acc_grad_sigma[0, 0]
+            self.acc_grad_sigma = _acc_grad_sigma
+            assert (
+                self.acc_grad_sigma.flags['C_CONTIGUOUS'] and
+                self.acc_grad_sigma.flags['OWNDATA']
+            )
+            self.acc_grad_sigma_ptr = &_acc_grad_sigma[0, 0]
 
 
     def get_phrases_vector(self, phrases, vocab):
