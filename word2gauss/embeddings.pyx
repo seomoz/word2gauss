@@ -1329,7 +1329,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
 
     text is a list of text documents / sentences.
 
-    Each element of the list is a numpy array of uint32_t IDs, with -1
+    Each element of the list is a numpy array of uint32_t IDs, with 4294967295
     signifying an OOV ID representing the document or sentence.
 
     For position k in the document, uses all contexts from k - half_window_size
@@ -1363,11 +1363,11 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
         cdoc = doc
         doc_len = cdoc.shape[0]
         for i in range(doc_len):
-            if cdoc[i] == -1:
+            if cdoc[i] == 4294967295:
                 # OOV word
                 continue
             for j in range(i + 1, min(i + half_window_size + 1, doc_len)):
-                if cdoc[j] == -1:
+                if cdoc[j] == 4294967295:
                     # OOV word
                     continue
                 # take nsamples_per_word samples
