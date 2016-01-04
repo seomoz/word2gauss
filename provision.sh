@@ -11,10 +11,6 @@ pip install -r requirements.txt
 python setup.py build_ext --inplace
 export PATH=$HOME/py/bin:$PATH
 
-echo 'Host github.com
-  StrictHostKeyChecking no
-' >> ~/.ssh/config
-
 mkdir ~/git
 (
     cd ~/git
@@ -25,4 +21,5 @@ mkdir ~/git
         python setup.py install
     )
 )
+
 
