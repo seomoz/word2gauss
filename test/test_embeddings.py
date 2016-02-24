@@ -133,6 +133,71 @@ class TestIPEnergy(unittest.TestCase):
         actual = embed.energy(1, 2)
         self.assertAlmostEqual(actual, expected, places=6)
 
+def numerical_grad(embed, i, j, eps=1.0e-3):
+    '''
+    Computes gradient and numerical gradient
+
+    returns [(grad mu, numerical grad mu), (grad sigma), (num. grad sigma)]
+    '''
+    from word2gauss.embeddings import COV_MAP
+
+    # compute the gradient at i, j
+    (dmui, dsigmai), (dmuj, dsigmaj) = embed.gradient(i, j)
+    dmu = [dmui, dmuj]
+    dsigma = [dsigmai, dsigmaj]
+
+    # now compute numerical gradient
+    Eij = embed.energy(i, j)
+
+    ndmu = [np.zeros(dmui.shape), np.zeros(dmuj.shape)]
+    ndsigma = [np.zeros(dsigmai.shape), np.zeros(dsigmaj.shape)]
+    
+    for ind, ij in enumerate([i, j]):
+        for k in xrange(embed.K):
+            embed.mu[ij, k] += eps
+            E = embed.energy(i, j)
+            ndmu[ind][k] = (E - Eij) / eps
+            embed.mu[ij, k] -= eps
+
+            if COV_MAP[embed.covariance_type] == 'diagonal':
+                embed.sigma[ij, k] += eps
+                E = embed.energy(i, j)
+                ndsigma[ind][k] = (E - Eij) / eps
+                embed.sigma[ij, k] -= eps
+
+        #if COV_MAP[embed.covariance_type] == 'spherical':
+        #    embed.sigma[ij] += eps
+        #    E = embed.energy(i, j)
+        #    ndsigma[ind] = (E - Eij) / eps
+        #    embed.sigma[ij] -= eps
+
+
+    return [(dmu, ndmu), (dsigma, ndsigma)]
+
+
+class TestNumericalGradient(unittest.TestCase):
+    def _num_grad_check(self, embed, eps, rtol):
+        [(dmu, ndmu), (dsigma, ndsigma)] = numerical_grad(embed, 0, 1, eps)
+        for ij in [0, 1]:
+            self.assertTrue(
+                np.allclose(dmu[ij], ndmu[ij], rtol=rtol))
+            self.assertTrue(
+                np.allclose(dsigma[ij], ndsigma[ij], rtol=rtol))
+
+    def test_numerical_grad_kl(self):
+        #embed = sample_embed('KL', 'spherical')
+        #self._num_grad_check(embed)
+
+        embed = sample_embed('KL', 'diagonal')
+        self._num_grad_check(embed, 1.0e-3, 1e-01)
+
+    def test_numerical_grad_ip(self):
+        #embed = sample_embed('IP', 'spherical')
+        #self._num_grad_check(embed, 1.0e-6, 1e-1)
+
+        embed = sample_embed('IP', 'diagonal')
+        self._num_grad_check(embed, 1.0e-3, 1e-01)
+
 
 class TestGaussianEmbedding(unittest.TestCase):
     def _training_data(self):
