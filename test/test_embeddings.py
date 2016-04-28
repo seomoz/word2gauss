@@ -1,9 +1,3 @@
-import sys
-from pathlib import Path
-this_path = Path(__file__)
-parent_dir_parent = this_path.parent.parent.parent
-sys.path.append(str(parent_dir_parent))
-
 import unittest
 import numpy as np
 import numpy.testing as test
@@ -299,8 +293,7 @@ class TestGaussianEmbedding(unittest.TestCase):
             covariance_type='spherical')
         vocab = sample_vocab()
         target = [["new"], ["york"]]
-        # res = np.array([-1. , 1.25])
-        res = np.array([1. , -1.25])
+        res = np.array([-1. , 1.25])
         vec = self.embed.phrases_to_vector(target, vocab=vocab)
         test.assert_array_equal(vec, res)
 
