@@ -1,4 +1,4 @@
-#cython: language_level=3, boundscheck=False, wraparound=False, embedsignature=True, cdivision=True
+#cython: boundscheck=False, wraparound=False, embedsignature=True, cdivision=True
 
 # Two different energies:
 #
@@ -57,13 +57,9 @@ from contextlib import closing
 from .utils import cosine
 
 from cpython.version cimport PY_MAJOR_VERSION
+import six
 
-if PY_MAJOR_VERSION >= 3:
-    basestring = str
-    from queue import Queue
-else:
-    range = xrange
-    from Queue import Queue
+from six.moves.queue import Queue
 
 LOGGER = logging.getLogger()
 
@@ -600,7 +596,7 @@ cdef class GaussianEmbedding:
                 phrase_vec = np.zeros(self.K)
                 for p in ph_tok:
                     # add a case for when we already have IDs?
-                    if isinstance(p, basestring):
+                    if isinstance(p, six.string_types):
                         phrase_vec += self.mu[vocab.word2id(p), :]
                 phrase_vec /= len(ph_tok)
                 vec += phrase_vec
@@ -650,14 +646,14 @@ cdef class GaussianEmbedding:
             sort results by increasing sigma
         '''
         # find the distribution to compare similarity to
-        if isinstance(target, basestring):
+        if isinstance(target, six.string_types):
             t = self.mu[vocab.word2id(target), :]
         elif isinstance(target, list):
             # positive and negative indices
             t = np.zeros(self.K)
             for pos_neg, fac in zip(target, [1.0, -1.0]):
                 for word_or_id in pos_neg:
-                    if isinstance(word_or_id, basestring):
+                    if isinstance(word_or_id, six.string_types):
                         # input is word, get its ID
                         word_id = vocab.word2id(word_or_id)
                         mu_val = self.mu[word_id, :]
