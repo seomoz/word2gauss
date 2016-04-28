@@ -60,9 +60,9 @@ from cpython.version cimport PY_MAJOR_VERSION
 
 if PY_MAJOR_VERSION >= 3:
     basestring = str
-    xrange = range
     from queue import Queue
 else:
+    range = xrange
     from Queue import Queue
 
 LOGGER = logging.getLogger()
