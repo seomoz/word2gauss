@@ -588,7 +588,8 @@ cdef class GaussianEmbedding:
         representation of those phrases
         '''
         vec = np.zeros(self.K)
-        if phrases == [''] or phrases == []:
+        # check that the phrases container is not empty
+        if not phrases or set(phrases) == {''}:
             return vec
         else:
             for ph in phrases:
