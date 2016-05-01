@@ -1,3 +1,11 @@
+This is a fork of [word2gauss](https://github.com/seomoz/word2gauss) that has been modified to run on Python 3 (I attempted to preserve compatibility with Python 2.7, but I have only tested the code on Python 3.5, and Python 2 compatibility may have suffered).
+
+This version passes all unit tests, but further testing may be required to ensure that the gaussian models produced by this code are fully correct.
+
+In addition to modifying the code to run on Python 3, I have rewritten parts of some functions to be able to withstand certain corner cases. I tried not to break anything in the process, but if you find anything, please let me know.
+
+Below is a copy of the original README:
+
 # word2gauss
 Gaussian word embeddings
 
