@@ -549,7 +549,15 @@ cdef class GaussianEmbedding:
                 for i, line in enumerate(f):
                     ls = line.strip().split()
                     # ls[0] is the word/id, skip it.  rest are mu
-                    _mu[i, :] = [float(ele) for ele in ls[1:]]
+                    mus = ls[1:]
+                    if len(mus) < K:
+                        # some lines have fewer features than expected
+                        # this usually happens when we encode the null string ''
+                        # into the model
+                        logging.warning('expected line to have {} features, found {}; skipping',
+                                        self.K, len(mus))
+                        continue
+                    _mu[i, :] = [float(ele) for ele in mus]
             with closing(fin.extractfile('mu_context')) as f:
                 _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE). \
                     reshape(N, -1).copy()
