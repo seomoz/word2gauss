@@ -22,6 +22,7 @@ mkdir ~/git
     (
         cd ~/git/vocab
         pip install -r requirements.txt
+		pip install auxlib
         python setup.py install
     )
 )
