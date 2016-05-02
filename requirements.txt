@@ -1,5 +1,6 @@
-numpy
-scipy
-nose
-coverage
+numpy>=1.11.0
+scipy>=0.17.0
+nose>=1.3.7
+six>=1.10.0
+coverage>=4.0.3
 Cython>=0.21.1
