@@ -181,10 +181,10 @@ cdef class GaussianEmbedding:
     cdef gradient_t gradient_func
 
     # pointers to data arrays
-    cdef DTYPE_t*mu_ptr
-    cdef DTYPE_t*sigma_ptr
-    cdef DTYPE_t*acc_grad_mu_ptr
-    cdef DTYPE_t*acc_grad_sigma_ptr
+    cdef DTYPE_t *mu_ptr
+    cdef DTYPE_t *sigma_ptr
+    cdef DTYPE_t *acc_grad_mu_ptr
+    cdef DTYPE_t *acc_grad_sigma_ptr
 
     def __cinit__(self, N, size=100,
                   covariance_type='spherical', mu_max=2.0, sigma_min=0.7, sigma_max=1.5,
