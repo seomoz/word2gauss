@@ -554,8 +554,9 @@ cdef class GaussianEmbedding:
                         # some lines have fewer features than expected
                         # this usually happens when we encode the null string ''
                         # into the model
-                        logging.warning('expected line to have {} features, found {}; skipping',
-                                        self.K, len(mus))
+                        logging.error('error with token {}'.format(line))
+                        logging.error('expected line to have {} features, found {}; skipping'.format(
+                                        K, len(mus)))
                         continue
                     _mu[i, :] = [float(ele) for ele in mus]
             with closing(fin.extractfile('mu_context')) as f:
@@ -1200,11 +1201,11 @@ cdef void train_batch(
     # in the spherical case dsigmai, j need to be size 1, but size K
     # in diagonal case.  To save code complexity we'll always allocate as
     # size K since K is small
-    cdef DTYPE_t*work = <DTYPE_t*> malloc(K * 4 * sizeof(DTYPE_t))
-    cdef DTYPE_t*dmui = work
-    cdef DTYPE_t*dmuj = work + K
-    cdef DTYPE_t*dsigmai = work + 2 * K
-    cdef DTYPE_t*dsigmaj = work + 3 * K
+    cdef DTYPE_t *work = <DTYPE_t*> malloc(K * 4 * sizeof(DTYPE_t))
+    cdef DTYPE_t *dmui = work
+    cdef DTYPE_t *dmuj = work + K
+    cdef DTYPE_t *dsigmai = work + 2 * K
+    cdef DTYPE_t *dsigmaj = work + 3 * K
 
     for k in range(Npairs):
 
@@ -1264,10 +1265,10 @@ cdef void train_batch(
     free(work)
 
 cdef void _accumulate_update(
-        size_t k, DTYPE_t*dmu, DTYPE_t*dsigma,
-        DTYPE_t*mu_ptr, DTYPE_t*sigma_ptr, uint32_t covariance_type,
+        size_t k, DTYPE_t* dmu, DTYPE_t* dsigma,
+        DTYPE_t* mu_ptr, DTYPE_t* sigma_ptr, uint32_t covariance_type,
         DTYPE_t fac, LearningRates*eta, DTYPE_t C, DTYPE_t m, DTYPE_t M,
-        DTYPE_t*acc_grad_mu, DTYPE_t*acc_grad_sigma,
+        DTYPE_t* acc_grad_mu, DTYPE_t* acc_grad_sigma,
         size_t N, size_t K
 ) nogil:
     # accumulate the gradients and update
