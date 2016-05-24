@@ -964,8 +964,7 @@ cdef void kl_gradient(size_t i, size_t j, size_t center_index,
         # Note:
         # Delta'[i, j] * Delta'[i, j].T is a dense K x K matrix, but we
         # only have one parameter that is tied along the diagonal.
-        # so, use the average of the diagnonal elements of the full
-        # matrix -- this amounts to the average of deltaprime ** 2
+        # so, use the diagnonal elements of the full matrix
         sum_deltaprime2 = 0.0
         one_over_si = 1.0 / sigmai_ptr[0]
         for k in xrange(K):
@@ -975,11 +974,11 @@ cdef void kl_gradient(size_t i, size_t j, size_t center_index,
             sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
-            sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
-            + sum_deltaprime2 / K
-            - (1.0 / sigmai_ptr[0])
+            K * sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
+            + sum_deltaprime2
+            - (K / sigmai_ptr[0])
         )
-        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0])
+        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0]) * K
 
     elif covariance_type == DIAGONAL:
         for k in xrange(K):
@@ -1119,8 +1118,8 @@ cdef void ip_gradient(size_t i, size_t j, size_t center_index,
             sum_delta2 += delta * delta
 
         dEdsigmai_ptr[0] = 0.5 * (
-            + sum_delta2 / K
-            - sigmai_plus_sigmaj_inv
+            + sum_delta2
+            - sigmai_plus_sigmaj_inv * K
         )
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 

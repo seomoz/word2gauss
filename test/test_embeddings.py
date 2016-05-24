@@ -3,7 +3,6 @@ import unittest
 import numpy as np
 import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
-#import vocab as v
 from vocab import Vocabulary
 
 DTYPE = np.float32
@@ -12,6 +11,7 @@ def sample_vocab():
     ngrams = [{'new':0, 'york':1, 'city':2}]
     vocab = Vocabulary(ngrams)
     return vocab
+
 
 def sample_embed(energy_type='KL', covariance_type='spherical', eta=0.1):
     mu = np.array([
@@ -165,11 +165,11 @@ def numerical_grad(embed, i, j, eps=1.0e-3):
                 ndsigma[ind][k] = (E - Eij) / eps
                 embed.sigma[ij, k] -= eps
 
-        #if COV_MAP[embed.covariance_type] == 'spherical':
-        #    embed.sigma[ij] += eps
-        #    E = embed.energy(i, j)
-        #    ndsigma[ind] = (E - Eij) / eps
-        #    embed.sigma[ij] -= eps
+        if COV_MAP[embed.covariance_type] == 'spherical':
+            embed.sigma[ij] += eps
+            E = embed.energy(i, j)
+            ndsigma[ind] = (E - Eij) / eps
+            embed.sigma[ij] -= eps
 
 
     return [(dmu, ndmu), (dsigma, ndsigma)]
@@ -185,18 +185,18 @@ class TestNumericalGradient(unittest.TestCase):
                 np.allclose(dsigma[ij], ndsigma[ij], rtol=rtol))
 
     def test_numerical_grad_kl(self):
-        #embed = sample_embed('KL', 'spherical')
-        #self._num_grad_check(embed)
+        embed = sample_embed('KL', 'spherical')
+        self._num_grad_check(embed, 1.0e-3, 1e-1)
 
         embed = sample_embed('KL', 'diagonal')
-        self._num_grad_check(embed, 1.0e-3, 1e-01)
+        self._num_grad_check(embed, 1.0e-3, 1e-1)
 
     def test_numerical_grad_ip(self):
-        #embed = sample_embed('IP', 'spherical')
-        #self._num_grad_check(embed, 1.0e-6, 1e-1)
+        embed = sample_embed('IP', 'spherical')
+        self._num_grad_check(embed, 1.0e-3, 1e-1)
 
         embed = sample_embed('IP', 'diagonal')
-        self._num_grad_check(embed, 1.0e-3, 1e-01)
+        self._num_grad_check(embed, 1.0e-3, 1e-1)
 
 
 class TestGaussianEmbedding(unittest.TestCase):
