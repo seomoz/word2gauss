@@ -3,7 +3,8 @@ sudo: required
 python:
   - 2.7
 script:
-  - export PATH=$HOME/py/bin:$PATH
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - source activate test-environment
   - make test
 cache:
   - apt
