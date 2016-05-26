@@ -23,14 +23,6 @@ source activate test-environment
 # other dependencies
 pip install -r requirements.txt
 
-mkdir ~/git
-pushd ~/git
-git clone https://github.com/seomoz/vocab.git
-pushd ~/git/vocab
-pip install -r requirements.txt
-python setup.py install
-popd; popd
-
 # finally our build
 python setup.py build_ext --inplace
 

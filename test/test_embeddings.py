@@ -3,13 +3,13 @@ import unittest
 import numpy as np
 import numpy.testing as test
 from word2gauss.embeddings import GaussianEmbedding, text_to_pairs
-from vocab import Vocabulary
+from word2gauss.words import Vocabulary
 
 DTYPE = np.float32
 
 def sample_vocab():
-    ngrams = [{'new':0, 'york':1, 'city':2}]
-    vocab = Vocabulary(ngrams)
+    tokens = {'new':0, 'york':1, 'city':2}
+    vocab = Vocabulary(tokens)
     return vocab
 
 
