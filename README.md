@@ -11,7 +11,7 @@ with asynchronous stochastic gradient descent (Adagrad).
 
 ### Installing
 1.  Install the dependencies: numpy, scipy, the packages in `requirements.txt`
-and [`vocab`](http://github.com/seomoz/vocab).  The Travis CI provisioning
+The Travis CI provisioning
 script installs these packages [`provision.sh`](provision.sh) and may be useful
 as a starting point.
 
@@ -42,6 +42,9 @@ sudo -E bash -c "make install"
 
 
 ### Code overview
+
+#### `GaussianEmbedding`
+
 The `GaussianEmbedding` class is the main workhorse for most tasks.  It
 stores the model data, deals with serialization to/from files and
 learns the parameters.  To allow embedding of non-word types like
@@ -50,18 +53,34 @@ no knowledge of any vocabulary and operates only on
 unique IDs.  Each ID is a `uint32` from `0 .. N-1` with `-1` signifying
 an OOV token.
 
-For learning word embeddings, the token - id mapping is off-loaded to
-the [`vocab`](http://github.com/seomoz/vocab) repository.  This provides a
-`Vocabulary` class that translates streams of documents into `token_id` lists
-and provides the ability to draw a random `token_id` from the
-token distribution.  The random generator is necessary for the negative
-sampling needed to generate training positive/negative training pairs from a
-sentence (see details below).
+#### `Vocabulary`
 
+For learning word embeddings, the token - id mapping is off-loaded to
+a `Vocabulary` class.  This class bundles together a string tokenizer,
+a token - id map, and a random token id generator (used for the negative
+sampling in training, see below).  This allows us to
+translate streams of documents into training examples.
+
+The class needs this interface:
+```
+    .word2id: given a token, return the id or raise KeyError if not in the vocab
+    .id2word: given a token id, return the token or raise IndexError if invalid
+    .tokenize: given a string, tokenize it using the tokenizer and then
+    remove all OOV tokens
+    .tokenize_ids: given a string, tokenize and return the token ids
+    .random_ids: given an integer, return a numpy array of random token ids
+```
+There is a simple implementation of a vocabulary class
+ (`word2gauss.words.Vocabulary`) that uses a simple uniform random from
+the `token_id` space for the negative samples.
+
+Alternatively, you can use `https://github.com/seomoz/vocab` that uses
+a sample based on the token counts, or provide your own implementation.
 
 ### Learning embeddings
 
-To learn embeddings, you will need a suitable corpus.
+To learn embeddings, you will need a suitable corpus and an implementation
+of the vocab class.
 
 ```python
 import logging
