@@ -60,6 +60,7 @@ LOGGER = logging.getLogger()
 
 cdef extern from "stdint.h":
     ctypedef unsigned long long uint32_t
+cdef uint32_t UINT32_MAX = 4294967295
 
 # type of our floating point arrays
 cdef type DTYPE = np.float32
@@ -963,8 +964,7 @@ cdef void kl_gradient(size_t i, size_t j, size_t center_index,
         # Note:
         # Delta'[i, j] * Delta'[i, j].T is a dense K x K matrix, but we
         # only have one parameter that is tied along the diagonal.
-        # so, use the average of the diagnonal elements of the full
-        # matrix -- this amounts to the average of deltaprime ** 2
+        # so, use the diagnonal elements of the full matrix
         sum_deltaprime2 = 0.0
         one_over_si = 1.0 / sigmai_ptr[0]
         for k in xrange(K):
@@ -974,11 +974,11 @@ cdef void kl_gradient(size_t i, size_t j, size_t center_index,
             sum_deltaprime2 += deltaprime * deltaprime
 
         dEdsigmai_ptr[0] = 0.5 * (
-            sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
-            + sum_deltaprime2 / K
-            - (1.0 / sigmai_ptr[0])
+            K * sigma_ptr[j] * (1.0 / sigmai_ptr[0]) ** 2
+            + sum_deltaprime2
+            - (K / sigmai_ptr[0])
         )
-        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0])
+        dEdsigmaj_ptr[0] = 0.5 * (1.0 / sigmaj_ptr[0] - 1.0 / sigmai_ptr[0]) * K
 
     elif covariance_type == DIAGONAL:
         for k in xrange(K):
@@ -1118,8 +1118,8 @@ cdef void ip_gradient(size_t i, size_t j, size_t center_index,
             sum_delta2 += delta * delta
 
         dEdsigmai_ptr[0] = 0.5 * (
-            + sum_delta2 / K
-            - sigmai_plus_sigmaj_inv
+            + sum_delta2
+            - sigmai_plus_sigmaj_inv * K
         )
         dEdsigmaj_ptr[0] = dEdsigmai_ptr[0]
 
@@ -1329,7 +1329,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
 
     text is a list of text documents / sentences.
 
-    Each element of the list is a numpy array of uint32_t IDs, with 4294967295
+    Each element of the list is a numpy array of uint32_t IDs, with UINT32_MAX 
     signifying an OOV ID representing the document or sentence.
 
     For position k in the document, uses all contexts from k - half_window_size
@@ -1363,11 +1363,11 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
         cdoc = doc
         doc_len = cdoc.shape[0]
         for i in range(doc_len):
-            if cdoc[i] == 4294967295:
+            if cdoc[i] == UINT32_MAX:
                 # OOV word
                 continue
             for j in range(i + 1, min(i + half_window_size + 1, doc_len)):
-                if cdoc[j] == 4294967295:
+                if cdoc[j] == UINT32_MAX:
                     # OOV word
                     continue
                 # take nsamples_per_word samples
