@@ -152,7 +152,7 @@ def numerical_grad(embed, i, j, eps=1.0e-3):
     ndsigma = [np.zeros(dsigmai.shape), np.zeros(dsigmaj.shape)]
     
     for ind, ij in enumerate([i, j]):
-        for k in xrange(embed.K):
+        for k in range(embed.K):
             embed.mu[ij, k] += eps
             E = embed.energy(i, j)
             ndmu[ind][k] = (E - Eij) / eps
