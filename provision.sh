@@ -4,7 +4,6 @@ set -e
 sudo apt-get update
 
 sudo apt-get -y install libatlas-base-dev libatlas-dev lib{blas,lapack}-dev gfortran
-<<<<<<< bc7e0c3487695c6bd09980be52eec2c45ac22b53
 # install conda, see http://conda.pydata.org/docs/travis.html
 if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
       wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
@@ -17,10 +16,6 @@ hash -r
 conda config --set always_yes yes --set changeps1 no
 conda update -q conda
 conda info -a
-=======
-sudo pip install auxlib
-sudo pip install conda
->>>>>>> moved auxlib install command
 conda_deps='pip numpy scipy'
 conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION $conda_deps
 source activate test-environment
