@@ -559,17 +559,40 @@ cdef class GaussianEmbedding:
                                         K, len(mus)))
                         continue
                     _mu[i, :] = [float(ele) for ele in mus]
-            with closing(fin.extractfile('mu_context')) as f:
-                _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE). \
-                    reshape(N, -1).copy()
-
-            with closing(fin.extractfile('sigma')) as f:
-                _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
-            with closing(fin.extractfile('acc_grad_mu')) as f:
-                _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2, K).copy()
-            with closing(fin.extractfile('acc_grad_sigma')) as f:
-                _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE). \
-                    reshape(N2, -1).copy()
+            try:
+                #try loading using pandas.read_csv because it's much faster
+                from pandas import read_csv
+                
+                logging.warn('loading model with pandas.read_csv instead of numpy.loadtxt')
+                logging.warn('this is much faster but will result in slightly different values (within a tolerance)')
+                
+                with closing(fin.extractfile('mu_context')) as f:
+                    _mu[self.N:, :] = read_csv(f, sep="\s+", header=None, \
+                        dtype=DTYPE).as_matrix().reshape(N, -1).copy()
+    
+                with closing(fin.extractfile('sigma')) as f:
+                    _sigma = read_csv(f, sep="\s+", header=None, dtype=DTYPE). \
+                    as_matrix().reshape(N2, -1).copy()
+                with closing(fin.extractfile('acc_grad_mu')) as f:
+                    _acc_grad_mu = read_csv(f, sep="\s+", header=None, \
+                        dtype=DTYPE).as_matrix().reshape(N2, K).copy()
+                with closing(fin.extractfile('acc_grad_sigma')) as f:
+                    _acc_grad_sigma = read_csv(f, sep="\s+", header=None, \
+                        dtype=DTYPE).as_matrix().reshape(N2, -1).copy()
+                            
+            except ModuleNotFoundError:
+                #fall back to numpy.loadtext
+                with closing(fin.extractfile('mu_context')) as f:
+                    _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE). \
+                        reshape(N, -1).copy()
+    
+                with closing(fin.extractfile('sigma')) as f:
+                    _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
+                with closing(fin.extractfile('acc_grad_mu')) as f:
+                    _acc_grad_mu = np.loadtxt(f, dtype=DTYPE).reshape(N2, K).copy()
+                with closing(fin.extractfile('acc_grad_sigma')) as f:
+                    _acc_grad_sigma = np.loadtxt(f, dtype=DTYPE). \
+                        reshape(N2, -1).copy()
 
         self.mu = _mu
         assert self.mu.flags['C_CONTIGUOUS'] and self.mu.flags['OWNDATA']
