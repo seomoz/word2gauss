@@ -580,7 +580,7 @@ cdef class GaussianEmbedding:
                     _acc_grad_sigma = read_csv(f, sep="\s+", header=None, \
                         dtype=DTYPE).as_matrix().reshape(N2, -1).copy()
                             
-            except ModuleNotFoundError:
+            except ImportError:
                 #fall back to numpy.loadtext
                 with closing(fin.extractfile('mu_context')) as f:
                     _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE). \
