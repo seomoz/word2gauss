@@ -569,7 +569,7 @@ cdef class GaussianEmbedding:
                 for p in ph_tok:
                     if isinstance(p, basestring):
                         phrase_vec += self.mu[vocab.word2id(p), :]
-                phrase_vec /= len(ph_tok)
+                if len(ph_tok) != 0: phrase_vec /= len(ph_tok)
                 vec += phrase_vec
             vec /= len(phrases)
             return vec
