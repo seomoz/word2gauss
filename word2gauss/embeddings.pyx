@@ -632,7 +632,7 @@ cdef class GaussianEmbedding:
                     # add a case for when we already have IDs?
                     if isinstance(p, six.string_types):
                         phrase_vec += self.mu[vocab.word2id(p), :]
-                phrase_vec /= len(ph_tok)
+                if len(ph_tok) != 0: phrase_vec /= len(ph_tok)
                 vec += phrase_vec
             vec /= len(phrases)
             return vec
