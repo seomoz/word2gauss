@@ -562,14 +562,14 @@ cdef class GaussianEmbedding:
             try:
                 #try loading using pandas.read_csv because it's much faster
                 from pandas import read_csv
-                
+
                 logging.warn('loading model with pandas.read_csv instead of numpy.loadtxt')
                 logging.warn('this is much faster but will result in slightly different values (within a tolerance)')
-                
+
                 with closing(fin.extractfile('mu_context')) as f:
                     _mu[self.N:, :] = read_csv(f, sep="\s+", header=None, \
                         dtype=DTYPE).as_matrix().reshape(N, -1).copy()
-    
+
                 with closing(fin.extractfile('sigma')) as f:
                     _sigma = read_csv(f, sep="\s+", header=None, dtype=DTYPE). \
                     as_matrix().reshape(N2, -1).copy()
@@ -579,13 +579,13 @@ cdef class GaussianEmbedding:
                 with closing(fin.extractfile('acc_grad_sigma')) as f:
                     _acc_grad_sigma = read_csv(f, sep="\s+", header=None, \
                         dtype=DTYPE).as_matrix().reshape(N2, -1).copy()
-                            
+
             except ImportError:
                 #fall back to numpy.loadtext
                 with closing(fin.extractfile('mu_context')) as f:
                     _mu[self.N:, :] = np.loadtxt(f, dtype=DTYPE). \
                         reshape(N, -1).copy()
-    
+
                 with closing(fin.extractfile('sigma')) as f:
                     _sigma = np.loadtxt(f, dtype=DTYPE).reshape(N2, -1).copy()
                 with closing(fin.extractfile('acc_grad_mu')) as f:
@@ -1381,7 +1381,7 @@ cpdef np.ndarray[uint32_t, ndim=2, mode='c'] text_to_pairs(
 
     text is a list of text documents / sentences.
 
-    Each element of the list is a numpy array of uint32_t IDs, with UINT32_MAX 
+    Each element of the list is a numpy array of uint32_t IDs, with UINT32_MAX
     signifying an OOV ID representing the document or sentence.
 
     For position k in the document, uses all contexts from k - half_window_size
