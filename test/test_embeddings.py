@@ -1,4 +1,3 @@
-
 import unittest
 import numpy as np
 import numpy.testing as test
@@ -76,7 +75,7 @@ class TestSaveLoad(unittest.TestCase):
         self.assertTrue(np.allclose(emb.sigma, embed.sigma))
         self.assertEqual(emb.covariance_type, embed.covariance_type)
         self.assertEqual(emb.energy_type, embed.energy_type)
-        for k, v in emb.eta.items():
+        for k, v in list(emb.eta.items()):
             self.assertAlmostEqual(embed.eta[k], v)
 
 class TestKLEnergy(unittest.TestCase):
@@ -153,7 +152,7 @@ def numerical_grad(embed, i, j, eps=1.0e-3):
     ndsigma = [np.zeros(dsigmai.shape), np.zeros(dsigmaj.shape)]
     
     for ind, ij in enumerate([i, j]):
-        for k in xrange(embed.K):
+        for k in range(embed.K):
             embed.mu[ij, k] += eps
             E = embed.energy(i, j)
             ndmu[ind][k] = (E - Eij) / eps
@@ -210,7 +209,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         # number of sample to do
         nsamples = 100000
         training_data = np.empty((nsamples, 5), dtype=np.uint32)
-        for k in xrange(nsamples):
+        for k in range(nsamples):
             i = np.random.randint(0, 10)
 
             # the positive sample
@@ -252,12 +251,12 @@ class TestGaussianEmbedding(unittest.TestCase):
             embed = sample_embed(covariance_type=covariance_type)
             embed.update(5)
 
-            self.assertEquals(embed.mu.shape, (10, 2))
-            self.assertEquals(embed.sigma.shape, (10, sigma_shape1))
-            self.assertEquals(embed.acc_grad_mu.shape, (10, 2))
-            self.assertEquals(embed.acc_grad_sigma.shape, (10, sigma_shape1))
+            self.assertEqual(embed.mu.shape, (10, 2))
+            self.assertEqual(embed.sigma.shape, (10, sigma_shape1))
+            self.assertEqual(embed.acc_grad_mu.shape, (10, 2))
+            self.assertEqual(embed.acc_grad_sigma.shape, (10, sigma_shape1))
 
-            self.assertEquals(embed.N, 5)
+            self.assertEqual(embed.N, 5)
 
     def test_train_batch_KL_spherical(self):
         training_data = self._training_data()
@@ -268,7 +267,7 @@ class TestGaussianEmbedding(unittest.TestCase):
             mu_max=2.0, sigma_min=0.8, sigma_max=1.0, eta=0.1, Closs=1.0
         )
 
-        for k in xrange(0, len(training_data), 100):
+        for k in range(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
         self._check_results(embed)
@@ -283,7 +282,7 @@ class TestGaussianEmbedding(unittest.TestCase):
 
         # diagonal training has more parameters so needs more then one
         # epoch to fully learn data
-        for k in xrange(0, len(training_data), 100):
+        for k in range(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
         self._check_results(embed)
@@ -324,7 +323,7 @@ class TestGaussianEmbedding(unittest.TestCase):
             mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
-        for k in xrange(0, len(training_data), 100):
+        for k in range(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
         self._check_results(embed)
@@ -338,7 +337,7 @@ class TestGaussianEmbedding(unittest.TestCase):
             mu_max=2.0, sigma_min=0.8, sigma_max=1.2, eta=0.1, Closs=1.0
         )
 
-        for k in xrange(0, len(training_data), 100):
+        for k in range(0, len(training_data), 100):
             embed.train_batch(training_data[k:(k+100)])
 
         self._check_results(embed)
@@ -353,7 +352,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         )
 
         def iter_pairs():
-            for k in xrange(0, len(training_data), 100):
+            for k in range(0, len(training_data), 100):
                 yield training_data[k:(k+100)]
 
         embed.train(iter_pairs(), n_workers=4)
@@ -369,7 +368,7 @@ class TestGaussianEmbedding(unittest.TestCase):
             'sigma_min': 0.0
         }
         actual = embed.eta
-        for k, v in expected.items():
+        for k, v in list(expected.items()):
             self.assertAlmostEqual(actual[k], v)
 
     def test_eta_multiple(self):
@@ -381,7 +380,7 @@ class TestGaussianEmbedding(unittest.TestCase):
         }
         embed = GaussianEmbedding(10, 5, eta=expected)
         actual = embed.eta
-        for k, v in expected.items():
+        for k, v in list(expected.items()):
             self.assertAlmostEqual(actual[k], v)
 
 

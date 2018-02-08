@@ -1,7 +1,10 @@
 
 *.pyc
 *.so
+*.egg
+*.egg-info
 build/*
+dist
 
 *.swp
 
@@ -9,6 +12,7 @@ build/*
 word2gauss/embeddings.cpp
 
 .coverage
+.idea
 
 
 
